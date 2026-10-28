@@ -11,4 +11,5 @@
 Wind related functions operating on numpy arrays.
 """
 
+from .convergence import *  # noqa
 from .wind import *  # noqa

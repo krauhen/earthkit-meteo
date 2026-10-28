@@ -534,3 +534,63 @@ def windrose(
     """
     dispatched = dispatch(windrose, fieldlist=False, array=True)
     return dispatched(speed, direction, sectors=sectors, speed_bins=speed_bins, percent=percent)
+
+
+def moisture_flux_convergence(
+    qv: "ArrayLike",
+    u: "ArrayLike",
+    v: "ArrayLike",
+    w: "ArrayLike",
+    hhl: "ArrayLike",
+    rotlat: "ArrayLike",
+    dlon: float,
+    dlat: float,
+    last_is_bottom: bool = True,
+    radius: float | None = None,
+) -> "ArrayLike":
+    r"""Compute the moisture flux convergence on a rotated lat/lon grid.
+
+    Local-only helper for the MeteoSwiss fieldextra port, not meant for upstream.
+
+    Parameters
+    ----------
+    qv: array-like
+        Specific humidity on full levels, shape (nk, nj, ni) [:math:`kg kg^{-1}`].
+    u: array-like
+        Grid-relative u wind, staggered to i+1/2, shape (nk, nj, ni) [:math:`m s^{-1}`].
+    v: array-like
+        Grid-relative v wind, staggered to j+1/2, shape (nk, nj, ni) [:math:`m s^{-1}`].
+    w: array-like
+        Vertical wind on half levels, shape (nk+1, nj, ni) [:math:`m s^{-1}`].
+    hhl: array-like
+        Height of half levels, shape (nk+1, nj, ni) [m].
+    rotlat: array-like
+        Rotated latitude of each row, shape (nj,) [degrees].
+    dlon: float
+        Grid spacing along i [degrees].
+    dlat: float
+        Grid spacing along j [degrees].
+    last_is_bottom: bool, optional
+        If True, the last level uses a one-sided vertical derivative.
+    radius: float | None, optional
+        Earth radius [m]; None means :data:`earthkit.meteo.constants.R_earth`.
+
+    Returns
+    -------
+    array-like
+        Moisture flux convergence, shape (nk, nj, ni) [:math:`kg kg^{-1} s^{-1}`].
+
+
+    Implementations
+    ---------------
+    :func:`moisture_flux_convergence` calls one of the following implementations
+    depending on the type of the input arguments:
+
+    - :py:meth:`earthkit.meteo.wind.array.moisture_flux_convergence` for array-like
+
+    The function returns an object of the same type as the ``qv`` argument.
+
+    """
+    kwargs = {} if radius is None else {"radius": radius}
+    dispatched = dispatch(moisture_flux_convergence, xarray=False, fieldlist=False, array=True)
+    return dispatched(qv, u, v, w, hhl, rotlat, dlon, dlat, last_is_bottom=last_is_bottom, **kwargs)
