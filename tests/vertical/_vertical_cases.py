@@ -600,3 +600,14 @@ def test_height_on_hybrid_levels(vertical, index, xp, device, h_type, h_referenc
     tolerance = Tolerance({64: (1e-8, 1e-6), 32: (10, 1e-6)})
     atol, rtol = tolerance.get(dtype=t.dtype)
     assert xp.allclose(h, h_ref, atol=atol, rtol=rtol), f"max abs diff={xp.max(xp.abs(h - h_ref))}"
+
+
+@pytest.mark.parametrize("xp, device", NAMESPACE_DEVICES)
+def test_ceiling_above_ground(vertical, xp, device):
+    ceiling = xp.asarray([1500.25, np.nan, 3000.0], dtype=xp.float32, device=device)
+    hsurf = xp.asarray([500.125, 400.0, 2999.5], dtype=xp.float64, device=device)
+
+    r = vertical.ceiling_above_ground(ceiling, hsurf)
+    assert r.dtype == xp.float32
+    expected = xp.asarray([1000.125, np.nan, 0.5], dtype=xp.float32, device=device)
+    assert xp.allclose(r, expected, equal_nan=True)

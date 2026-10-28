@@ -1590,6 +1590,37 @@ def interpolate_sleve_to_theta_levels(
     )
 
 
+def ceiling_above_ground(ceiling: "ArrayLike", hsurf: "ArrayLike") -> "ArrayLike":
+    r"""Cloud ceiling above ground from the ceiling above mean sea level.
+
+    Local-only helper for the MeteoSwiss fieldextra port, not meant for upstream.
+
+    Parameters
+    ----------
+    ceiling: array-like
+        Cloud ceiling above mean sea level [m]; nan means no ceiling.
+    hsurf: array-like
+        Surface height above mean sea level [m].
+
+    Returns
+    -------
+    array-like
+        Ceiling above ground [m], in the dtype of ``ceiling``.
+
+
+    Implementations
+    ---------------
+    :func:`ceiling_above_ground` calls one of the following implementations
+    depending on the type of the input arguments:
+
+    - :py:meth:`earthkit.meteo.vertical.array.ceiling_above_ground` for array-like
+
+    The function returns an object of the same type as the ``ceiling`` argument.
+
+    """
+    return dispatch(ceiling_above_ground, xarray=False, fieldlist=False, array=True)(ceiling, hsurf)
+
+
 @overload
 def extrapolate_temperature_to_pressure_levels_below_surface(
     t_sfc: "ArrayLike",

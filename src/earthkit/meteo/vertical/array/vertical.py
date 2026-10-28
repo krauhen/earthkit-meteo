@@ -1775,6 +1775,35 @@ def interpolate_monotonic(
     )
 
 
+def ceiling_above_ground(ceiling: ArrayLike, hsurf: ArrayLike) -> ArrayLike:
+    r"""Cloud ceiling above ground from the ceiling above mean sea level.
+
+    .. math::
+
+        c_{agl} = c_{amsl} - h_{surf}
+
+    Local-only helper for the MeteoSwiss fieldextra port, not meant for upstream: it is a
+    single subtraction.
+
+    Parameters
+    ----------
+    ceiling : ArrayLike
+        Cloud ceiling above mean sea level [m]. Nan means no ceiling.
+    hsurf : ArrayLike
+        Surface height above mean sea level [m].
+
+    Returns
+    -------
+    ArrayLike
+        Ceiling above ground [m], in the dtype of ``ceiling``: ``hsurf`` is cast to it before
+        the subtraction, so float32 input is subtracted in float32. Nan where either input
+        is nan.
+    """
+    xp = array_namespace(ceiling, hsurf)
+    ceiling = xp.asarray(ceiling)
+    return ceiling - xp.astype(xp.asarray(hsurf), ceiling.dtype)
+
+
 _BELOW_SURFACE_H1 = 2000.0  # m
 _BELOW_SURFACE_H2 = 2500.0  # m
 _BELOW_SURFACE_T1 = 298.0  # K
