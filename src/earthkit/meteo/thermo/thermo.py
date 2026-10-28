@@ -3159,3 +3159,51 @@ def specific_gas_constant(
     """
     dispatched = dispatch(specific_gas_constant, array=True)
     return dispatched(q)
+
+
+def bulk_richardson_number(
+    theta_v: "ArrayLike",
+    z: "ArrayLike",
+    u: "ArrayLike",
+    v: "ArrayLike",
+    z_sfc: "ArrayLike" = 0.0,
+    vertical_dim: int = 0,
+    vmin: float = 1.0e-3,
+) -> "ArrayLike":
+    r"""Compute the bulk Richardson number on each level relative to the lowest level.
+
+    Parameters
+    ----------
+    theta_v: array-like
+        Virtual potential temperature on levels (K).
+    z: array-like
+        Height of the levels above sea level (m).
+    u: array-like
+        Eastward wind component on levels (m/s).
+    v: array-like
+        Northward wind component on levels (m/s).
+    z_sfc: array-like, optional
+        Surface height above sea level (m), shaped like one level (default: 0).
+    vertical_dim: int, optional
+        Vertical axis; levels are ordered from the top down (default: 0).
+    vmin: float, optional
+        Lower bound of the wind speed (m/s) in the denominator (default: 1e-3).
+
+    Returns
+    -------
+    array-like
+        Bulk Richardson number (dimensionless) on each level.
+
+
+    Implementations
+    ---------------
+    :func:`bulk_richardson_number` calls one of the following implementations depending
+    on the type of the input arguments:
+
+    - :py:meth:`earthkit.meteo.thermo.array.bulk_richardson_number` for array-like
+
+    The function returns an object of the same type as the input arguments.
+    """
+    return dispatch(bulk_richardson_number, xarray=False, fieldlist=False, array=True)(
+        theta_v, z, u, v, z_sfc=z_sfc, vertical_dim=vertical_dim, vmin=vmin
+    )
