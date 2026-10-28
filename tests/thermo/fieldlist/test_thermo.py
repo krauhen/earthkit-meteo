@@ -1157,3 +1157,29 @@ def test_fieldlist_specific_gas_constant(input_type):
         assert out.get("parameter.units") == "J kg-1 K-1"
         ref = array.specific_gas_constant(np.array(SPECIFIC_HUMIDITIES[0]))
         np.testing.assert_allclose(out.values, ref)
+
+
+@pytest.mark.parametrize("input_type", ["fieldlist", "field"])
+def test_fieldlist_humidity_from_dewpoint_method(input_type):
+    import earthkit.meteo.thermo.array as array
+    import earthkit.meteo.thermo.fieldlist as fieldlist
+
+    t = _make_input_fieldlist("t", values=TEMPERATURES, input_type=input_type)
+    td = _make_input_fieldlist("td", values=DEWPOINTS, input_type=input_type)
+    q = _make_input_fieldlist("q", values=SPECIFIC_HUMIDITIES, input_type=input_type)
+    p = _make_pres_fieldlist(t, pres_type="fl")
+
+    out_rd = fieldlist.relative_humidity_from_dewpoint(t, td, method="cosmo")
+    out_qd = fieldlist.specific_humidity_from_dewpoint(td, p, method="cosmo")
+    out_rq = fieldlist.relative_humidity_from_specific_humidity(t, q, p, phase="water", method="cosmo")
+
+    n = len(t) if input_type == "fieldlist" else 1
+    fields = zip(*(o if input_type == "fieldlist" else [o] for o in (out_rd, out_qd, out_rq)))
+    for i, (f_rd, f_qd, f_rq) in enumerate(fields):
+        assert i < n
+        vt, vtd, vq, vp = (np.array(x[i]) for x in (TEMPERATURES, DEWPOINTS, SPECIFIC_HUMIDITIES, PRESSURES))
+        np.testing.assert_allclose(f_rd.values, array.relative_humidity_from_dewpoint(vt, vtd, method="cosmo"))
+        np.testing.assert_allclose(f_qd.values, array.specific_humidity_from_dewpoint(vtd, vp, method="cosmo"))
+        ref = array.relative_humidity_from_specific_humidity(vt, vq, vp, phase="water", method="cosmo")
+        np.testing.assert_allclose(f_rq.values, ref)
+        assert not np.allclose(f_rd.values, array.relative_humidity_from_dewpoint(vt, vtd))

@@ -1068,3 +1068,128 @@ def test_specific_gas_constant(q, v_ref, xp, device):
     q, v_ref = xp.asarray(q, device=device), xp.asarray(v_ref, device=device)
     r = thermo.array.specific_gas_constant(q)
     assert xp.allclose(r, v_ref)
+
+
+@pytest.mark.parametrize("xp, device", NAMESPACE_DEVICES)
+@pytest.mark.parametrize("phase", ["water", "ice"])
+def test_saturation_vapour_pressure_cosmo_1(xp, device, phase):
+    ref_file = "sat_vp_cosmo.csv"
+
+    # Generated from the Magnus formula with the Sonntag (1990) coefficients:
+    # t = np.arange(-40.0, 40.1, 5.0) + 273.15
+    # tc = t - 273.15
+    # o = {"t": t}
+    # o["water"] = 611.2 * np.exp(17.62 * tc / (243.12 + tc))
+    # o["ice"] = 611.2 * np.exp(22.46 * tc / (272.62 + tc))
+    # save_test_reference(ref_file, o)
+
+    d = read_data_file(ref_file)
+
+    t = xp.asarray(d["t"], device=device)
+    v_ref = xp.asarray(d[phase], device=device)
+
+    svp = thermo.array.saturation_vapour_pressure(t, phase=phase, method="cosmo")
+    assert xp.allclose(svp, v_ref)
+
+
+@pytest.mark.parametrize("xp, device", NAMESPACE_DEVICES)
+@pytest.mark.parametrize("phase", ["water", "ice"])
+def test_saturation_vapour_pressure_cosmo_2(xp, device, phase):
+    # at 0 °C the Magnus formula reduces to its first coefficient for both phases
+    t = xp.asarray([273.15], device=device)
+    v_ref = xp.asarray([611.2], device=device)
+
+    svp = thermo.array.saturation_vapour_pressure(t, phase=phase, method="cosmo")
+    assert xp.allclose(svp, v_ref, rtol=1e-12)
+
+
+@pytest.mark.parametrize("xp, device", NAMESPACE_DEVICES)
+@pytest.mark.parametrize("phase", ["mixed", "water", "ice"])
+def test_saturation_vapour_pressure_slope_cosmo(xp, device, phase):
+    # temperatures away from the ends of the "mixed" interpolation range
+    t = xp.asarray([233.15, 245.15, 260.15, 270.15, 283.15, 303.15], device=device)
+    h = 1e-3
+
+    slope = thermo.array.saturation_vapour_pressure_slope(t, phase=phase, method="cosmo")
+    es_p = thermo.array.saturation_vapour_pressure(t + h, phase=phase, method="cosmo")
+    es_m = thermo.array.saturation_vapour_pressure(t - h, phase=phase, method="cosmo")
+    v_ref = (es_p - es_m) / (2 * h)
+    assert xp.allclose(slope, v_ref, rtol=1e-6, atol=0)
+
+
+def _magnus_water(t):
+    tc = t - 273.15
+    return 611.2 * np.exp(17.62 * tc / (243.12 + tc))
+
+
+@pytest.mark.parametrize("xp, device", NAMESPACE_DEVICES)
+def test_humidity_from_dewpoint_ifs_default(xp, device):
+    # method="ifs" is the default and still reproduces the reference data
+    d = ThermoInputData(xp, device)
+
+    r = thermo.array.relative_humidity_from_dewpoint(d.t, d.td, method="ifs")
+    assert xp.allclose(r, d.r, equal_nan=True)
+    assert xp.allclose(r, thermo.array.relative_humidity_from_dewpoint(d.t, d.td), equal_nan=True)
+
+    r = thermo.array.relative_humidity_from_specific_humidity(d.t, d.q, d.p, phase="mixed", method="ifs")
+    assert xp.allclose(r, d.r, equal_nan=True)
+
+    q = thermo.array.specific_humidity_from_dewpoint(d.td, d.p, method="ifs")
+    assert xp.allclose(q, thermo.array.specific_humidity_from_dewpoint(d.td, d.p), equal_nan=True)
+
+
+@pytest.mark.parametrize("xp, device", NAMESPACE_DEVICES)
+def test_humidity_from_dewpoint_cosmo(xp, device):
+    t_np = np.array([-20.0, -5.0, 0.0, 12.0, 30.0]) + 273.15
+    td_np = np.array([-25.0, -8.0, -3.0, 7.0, 18.0]) + 273.15
+    p_np = np.array([70000.0, 85000.0, 90000.0, 95000.0, 101325.0])
+
+    t = xp.asarray(t_np, device=device)
+    td = xp.asarray(td_np, device=device)
+    p = xp.asarray(p_np, device=device)
+
+    v_ref = xp.asarray(100.0 * _magnus_water(td_np) / _magnus_water(t_np), device=device)
+    r = thermo.array.relative_humidity_from_dewpoint(t, td, method="cosmo")
+    assert xp.allclose(r, v_ref, rtol=1e-12)
+
+    e = _magnus_water(td_np)
+    eps = constants.epsilon
+    v_ref = xp.asarray(eps * e / (p_np + (eps - 1) * e), device=device)
+    q = thermo.array.specific_humidity_from_dewpoint(td, p, method="cosmo")
+    assert xp.allclose(q, v_ref, rtol=1e-12)
+
+
+@pytest.mark.parametrize("xp, device", NAMESPACE_DEVICES)
+def test_relative_humidity_from_specific_humidity_phase(xp, device):
+    t = xp.asarray(np.array([-20.0, -5.0, 0.5, 10.0, 25.0]) + 273.15, device=device)
+    q = xp.asarray([0.0005, 0.002, 0.003, 0.006, 0.012], device=device)
+    p = xp.asarray([70000.0, 85000.0, 90000.0, 95000.0, 101325.0], device=device)
+
+    r_water = thermo.array.relative_humidity_from_specific_humidity(t, q, p, phase="water", method="cosmo")
+    r_mixed = thermo.array.relative_humidity_from_specific_humidity(t, q, p, phase="mixed", method="cosmo")
+
+    # identical above 0 °C, larger "mixed" values below (ice saturation is lower)
+    assert xp.allclose(r_water[2:], r_mixed[2:], rtol=1e-12)
+    assert xp.all(r_mixed[:2] > r_water[:2])
+
+    # phase="water" matches the vapour pressure over the Magnus water curve
+    e = thermo.array.vapour_pressure_from_specific_humidity(q, p)
+    v_ref = 100.0 * e / thermo.array.saturation_vapour_pressure(t, phase="water", method="cosmo")
+    assert xp.allclose(r_water, v_ref, rtol=1e-12)
+
+
+@pytest.mark.parametrize("xp, device", NAMESPACE_DEVICES)
+def test_humidity_invalid_method(xp, device):
+    t = xp.asarray([280.0], device=device)
+    td = xp.asarray([275.0], device=device)
+    q = xp.asarray([0.005], device=device)
+    p = xp.asarray([90000.0], device=device)
+
+    with pytest.raises(ValueError):
+        thermo.array.relative_humidity_from_dewpoint(t, td, method="unknown")
+
+    with pytest.raises(ValueError):
+        thermo.array.relative_humidity_from_specific_humidity(t, q, p, method="unknown")
+
+    with pytest.raises(ValueError):
+        thermo.array.specific_humidity_from_dewpoint(td, p, method="unknown")

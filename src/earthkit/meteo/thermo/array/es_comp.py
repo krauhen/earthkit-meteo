@@ -26,8 +26,13 @@ TI = T0 - 23
 HUANG_W = (34.494, 4924.99, 237.1, 105.0, 1.57)
 HUANG_I = (43.494, 6545.8, 278.0, 868.0, 2.0)
 
+# COSMO/ICON Magnus coefficients (Sonntag 1990): (a1 in Pa, a3, b in °C) of
+# es = a1 * exp(a3 * tc / (b + tc)), where tc is the temperature in Celsius
+COSMO_W = (611.2, 17.62, 243.12)
+COSMO_I = (611.2, 22.46, 272.62)
+
 PHASES = ["mixed", "water", "ice"]
-METHODS = ["ifs", "huang"]
+METHODS = ["ifs", "huang", "cosmo"]
 
 
 def check_phase(phase):
@@ -53,7 +58,7 @@ def compute_es(t, phase, method="ifs"):
         Define the phase with respect to the saturation vapour pressure is computed.
         It is either “water”, “ice” or “mixed”.
     method: str, optional
-        The computation method: "ifs" or "huang".
+        The computation method: "ifs", "huang" or "cosmo".
 
     Returns
     -------
@@ -87,7 +92,19 @@ def compute_es(t, phase, method="ifs"):
       the IAPWS reference data between 0 °C and 100 °C for water and between -100 °C and 0 °C
       for ice.
 
-    When ``phase`` is "mixed" the formula is based on the value of ``t`` (for both methods):
+    * "cosmo": the Magnus formula with the coefficients by [Sonntag1990]_, as used in the
+      COSMO and ICON models, is used when ``phase`` is "water" or "ice":
+
+        .. math::
+
+            e_{sat} = a_{1} exp \left(a_{3}\frac{t_{c}}{t_{c} + b}\right)
+
+      where :math:`t_{c} = t - 273.15` is the temperature in °C and the parameters are set as follows:
+
+      * ``phase`` = "water": :math:`a_{1}` =611.2 Pa, :math:`a_{3}` =17.62 and :math:`b` =243.12 °C
+      * ``phase`` = "ice": :math:`a_{1}` =611.2 Pa, :math:`a_{3}` =22.46 and :math:`b` =272.62 °C
+
+    When ``phase`` is "mixed" the formula is based on the value of ``t`` (for all methods):
 
     * if :math:`t <= t_{i}`: the formula for ``phase`` = "ice" is used (:math:`t_{i} = 250.16 K`)
     * if :math:`t >= t_{0}`: the formula for ``phase`` = "water" is used (:math:`t_{0} = 273.16 K`)
@@ -123,7 +140,7 @@ def compute_slope(t, phase, method="ifs"):
         It is either “water”, “ice” or “mixed”. See :func:`saturation_vapour_pressure`
         for details.
     method: str, optional
-        The computation method: "ifs" or "huang". See :func:`saturation_vapour_pressure`
+        The computation method: "ifs", "huang" or "cosmo". See :func:`saturation_vapour_pressure`
         for details.
 
     Returns
@@ -189,6 +206,19 @@ def _es_ice_huang(t, xp):
     return _es_huang(t, xp, *HUANG_I)
 
 
+def _es_magnus(t, xp, a1, a3, b):
+    tc = t - T_C2K
+    return a1 * xp.exp(a3 * tc / (tc + b))
+
+
+def _es_water_cosmo(t, xp):
+    return _es_magnus(t, xp, *COSMO_W)
+
+
+def _es_ice_cosmo(t, xp):
+    return _es_magnus(t, xp, *COSMO_I)
+
+
 def _es_mixed(t, xp, es_water, es_ice):
     # Fraction of liquid water (=alpha):
     #   t <= ti => alpha=0
@@ -238,6 +268,19 @@ def _es_ice_huang_slope(t, xp):
     return _es_huang_slope(t, xp, *HUANG_I)
 
 
+def _es_magnus_slope(t, xp, a1, a3, b):
+    tc = t - T_C2K
+    return _es_magnus(t, xp, a1, a3, b) * (a3 * b) / xp.square(tc + b)
+
+
+def _es_water_cosmo_slope(t, xp):
+    return _es_magnus_slope(t, xp, *COSMO_W)
+
+
+def _es_ice_cosmo_slope(t, xp):
+    return _es_magnus_slope(t, xp, *COSMO_I)
+
+
 def _es_mixed_slope(t, xp, es_water, es_ice, es_water_slope, es_ice_slope):
     t = xp.asarray(t)
     d_svp = xp.zeros_like(t, dtype=t.dtype)
@@ -268,10 +311,12 @@ def _es_mixed_slope(t, xp, es_water, es_ice, es_water_slope, es_ice_slope):
 _ES_FUNCS = {
     "ifs": (_es_water, _es_ice),
     "huang": (_es_water_huang, _es_ice_huang),
+    "cosmo": (_es_water_cosmo, _es_ice_cosmo),
 }
 
 # Water and ice saturation vapour pressure slope functions for each method
 _ES_SLOPE_FUNCS = {
     "ifs": (_es_water_slope, _es_ice_slope),
     "huang": (_es_water_huang_slope, _es_ice_huang_slope),
+    "cosmo": (_es_water_cosmo_slope, _es_ice_cosmo_slope),
 }

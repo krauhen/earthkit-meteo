@@ -211,7 +211,7 @@ def saturation_vapour_pressure(t: xr.DataArray, phase: str = "mixed", method: st
         Define the phase with respect to the saturation vapour pressure is computed.
         It is either “water”, “ice” or “mixed”.
     method: str, optional
-        The computation method: "ifs" or "huang".
+        The computation method: "ifs", "huang" or "cosmo".
 
     Returns
     -------
@@ -245,7 +245,19 @@ def saturation_vapour_pressure(t: xr.DataArray, phase: str = "mixed", method: st
       the IAPWS reference data between 0 °C and 100 °C for water and between -100 °C and 0 °C
       for ice.
 
-    When ``phase`` is "mixed" the formula is based on the value of ``t`` (for both methods):
+    * "cosmo": the Magnus formula with the coefficients by [Sonntag1990]_, as used in the
+      COSMO and ICON models, is used when ``phase`` is "water" or "ice":
+
+        .. math::
+
+            e_{sat} = a_{1} exp \left(a_{3}\frac{t_{c}}{t_{c} + b}\right)
+
+      where :math:`t_{c} = t - 273.15` is the temperature in °C and the parameters are set as follows:
+
+      * ``phase`` = "water": :math:`a_{1}` =611.2 Pa, :math:`a_{3}` =17.62 and :math:`b` =243.12 °C
+      * ``phase`` = "ice": :math:`a_{1}` =611.2 Pa, :math:`a_{3}` =22.46 and :math:`b` =272.62 °C
+
+    When ``phase`` is "mixed" the formula is based on the value of ``t`` (for all methods):
 
     * if :math:`t <= t_{i}`: the formula for ``phase`` = "ice" is used (:math:`t_{i} = 250.16 K`)
     * if :math:`t >= t_{0}`: the formula for ``phase`` = "water" is used (:math:`t_{0} = 273.16 K`)
@@ -356,7 +368,7 @@ def saturation_vapour_pressure_slope(t: xr.DataArray, phase: str = "mixed", meth
         It is either “water”, “ice” or “mixed”. See :func:`saturation_vapour_pressure`
         for details.
     method: str, optional
-        The computation method: "ifs" or "huang". See :func:`saturation_vapour_pressure`
+        The computation method: "ifs", "huang" or "cosmo". See :func:`saturation_vapour_pressure`
         for details.
 
     Returns
@@ -400,7 +412,7 @@ def saturation_mixing_ratio_slope(
     eps: number
         Where p - es < ``eps`` nan is returned.
     method: str, optional
-        The computation method: "ifs" or "huang". See :func:`saturation_vapour_pressure`
+        The computation method: "ifs", "huang" or "cosmo". See :func:`saturation_vapour_pressure`
         for details.
 
     Returns
@@ -465,7 +477,7 @@ def saturation_specific_humidity_slope(
     eps: number
         Where p - es < ``eps`` nan is returned.
     method: str, optional
-        The computation method: "ifs" or "huang". See :func:`saturation_vapour_pressure`
+        The computation method: "ifs", "huang" or "cosmo". See :func:`saturation_vapour_pressure`
         for details.
 
     Returns
@@ -529,7 +541,7 @@ def temperature_from_saturation_vapour_pressure(es: xr.DataArray) -> xr.DataArra
     })
 
 
-def relative_humidity_from_dewpoint(t: xr.DataArray, td: xr.DataArray) -> xr.DataArray:
+def relative_humidity_from_dewpoint(t: xr.DataArray, td: xr.DataArray, method: str = "ifs") -> xr.DataArray:
     r"""Compute the relative humidity from dewpoint temperature.
 
     Parameters
@@ -538,6 +550,9 @@ def relative_humidity_from_dewpoint(t: xr.DataArray, td: xr.DataArray) -> xr.Dat
         Temperature (K)
     td: xarray.DataArray
         Dewpoint (K)
+    method: str, optional
+        Method of the saturation vapour pressure: "ifs", "huang" or "cosmo".
+        See :func:`saturation_vapour_pressure` for details.
 
     Returns
     -------
@@ -554,13 +569,16 @@ def relative_humidity_from_dewpoint(t: xr.DataArray, td: xr.DataArray) -> xr.Dat
     where :math:`e_{wsat}` is the :func:`saturation_vapour_pressure` over water.
 
     """
-    return xarray_ufunc(array.relative_humidity_from_dewpoint, t, td).assign_attrs({
+    return xarray_ufunc(array.relative_humidity_from_dewpoint, t, td, method=method).assign_attrs({
         "standard_name": "relative_humidity",
+        "method": method,
         "units": "%",
     })
 
 
-def relative_humidity_from_specific_humidity(t: xr.DataArray, q: xr.DataArray, p: xr.DataArray) -> xr.DataArray:
+def relative_humidity_from_specific_humidity(
+    t: xr.DataArray, q: xr.DataArray, p: xr.DataArray, phase: str = "mixed", method: str = "ifs"
+) -> xr.DataArray:
     r"""Compute the relative humidity from specific humidity.
 
     Parameters
@@ -571,6 +589,12 @@ def relative_humidity_from_specific_humidity(t: xr.DataArray, q: xr.DataArray, p
         Specific humidity (kg/kg)
     p: xarray.DataArray
         Pressure (Pa)
+    phase: str, optional
+        Phase of the saturation vapour pressure: "mixed", "water" or "ice".
+        See :func:`saturation_vapour_pressure` for details.
+    method: str, optional
+        Method of the saturation vapour pressure: "ifs", "huang" or "cosmo".
+        See :func:`saturation_vapour_pressure` for details.
 
     Returns
     -------
@@ -582,21 +606,25 @@ def relative_humidity_from_specific_humidity(t: xr.DataArray, q: xr.DataArray, p
 
     .. math::
 
-        r = 100 \frac {e(q, p)}{e_{msat}(t)}
+        r = 100 \frac {e(q, p)}{e_{sat}(t)}
 
     where:
 
         * :math:`e` is the vapour pressure (see :func:`vapour_pressure_from_specific_humidity`)
-        * :math:`e_{msat}` is the :func:`saturation_vapour_pressure` based on the "mixed" phase
+        * :math:`e_{sat}` is the :func:`saturation_vapour_pressure` with respect to ``phase``
 
     """
-    return xarray_ufunc(array.relative_humidity_from_specific_humidity, t, q, p).assign_attrs({
+    return xarray_ufunc(
+        array.relative_humidity_from_specific_humidity, t, q, p, phase=phase, method=method
+    ).assign_attrs({
         "standard_name": "relative_humidity",
+        "phase": phase,
+        "method": method,
         "units": "%",
     })
 
 
-def specific_humidity_from_dewpoint(td: xr.DataArray, p: xr.DataArray) -> xr.DataArray:
+def specific_humidity_from_dewpoint(td: xr.DataArray, p: xr.DataArray, method: str = "ifs") -> xr.DataArray:
     r"""Compute the specific humidity from dewpoint.
 
     Parameters
@@ -605,6 +633,9 @@ def specific_humidity_from_dewpoint(td: xr.DataArray, p: xr.DataArray) -> xr.Dat
         Dewpoint (K)
     p: xarray.DataArray
         Pressure (Pa)
+    method: str, optional
+        Method of the saturation vapour pressure: "ifs", "huang" or "cosmo".
+        See :func:`saturation_vapour_pressure` for details.
 
     Returns
     -------
@@ -627,8 +658,9 @@ def specific_humidity_from_dewpoint(td: xr.DataArray, p: xr.DataArray) -> xr.Dat
     Then `q` is computed from :math:`e` using :func:`specific_humidity_from_vapour_pressure`.
 
     """
-    return xarray_ufunc(array.specific_humidity_from_dewpoint, td, p).assign_attrs({
+    return xarray_ufunc(array.specific_humidity_from_dewpoint, td, p, method=method).assign_attrs({
         "standard_name": "specific_humidity",
+        "method": method,
         "units": "kg kg-1",
     })
 

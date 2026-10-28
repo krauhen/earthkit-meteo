@@ -531,7 +531,19 @@ def saturation_vapour_pressure(
       the IAPWS reference data between 0 °C and 100 °C for water and between -100 °C and 0 °C
       for ice.
 
-    When ``phase`` is \"mixed\" the formula is based on the value of ``t`` (for both methods):
+    * "cosmo": the Magnus formula with the coefficients by [Sonntag1990]_, as used in the
+      COSMO and ICON models, is used when ``phase`` is "water" or "ice":
+
+        .. math::
+
+            e_{sat} = a_{1} exp \left(a_{3}\frac{t_{c}}{t_{c} + b}\right)
+
+      where :math:`t_{c} = t - 273.15` is the temperature in °C and the parameters are set as follows:
+
+      * ``phase`` = "water": :math:`a_{1}` =611.2 Pa, :math:`a_{3}` =17.62 and :math:`b` =243.12 °C
+      * ``phase`` = "ice": :math:`a_{1}` =611.2 Pa, :math:`a_{3}` =22.46 and :math:`b` =272.62 °C
+
+    When ``phase`` is "mixed" the formula is based on the value of ``t`` (for all methods):
 
     * if :math:`t <= t_{i}`: the formula for ``phase`` = \"ice\" is used (:math:`t_{i} = 250.16 K`)
     * if :math:`t >= t_{0}`: the formula for ``phase`` = \"water\" is used (:math:`t_{0} = 273.16 K`)
@@ -1105,6 +1117,7 @@ def temperature_from_saturation_vapour_pressure(
 def relative_humidity_from_dewpoint(
     t: "ArrayLike",
     td: "ArrayLike",
+    method: str = "ifs",
 ) -> "ArrayLike": ...
 
 
@@ -1112,6 +1125,7 @@ def relative_humidity_from_dewpoint(
 def relative_humidity_from_dewpoint(
     t: "xarray.DataArray",
     td: "xarray.DataArray",
+    method: str = "ifs",
 ) -> "xarray.DataArray": ...
 
 
@@ -1119,6 +1133,7 @@ def relative_humidity_from_dewpoint(
 def relative_humidity_from_dewpoint(
     t: "FieldList",
     td: "FieldList",
+    method: str = "ifs",
 ) -> "FieldList": ...
 
 
@@ -1126,12 +1141,14 @@ def relative_humidity_from_dewpoint(
 def relative_humidity_from_dewpoint(
     t: "Field",
     td: "Field",
+    method: str = "ifs",
 ) -> "Field": ...
 
 
 def relative_humidity_from_dewpoint(
     t: "ArrayLike" | "xarray.DataArray" | "FieldList" | "Field",
     td: "ArrayLike" | "xarray.DataArray" | "FieldList" | "Field",
+    method: str = "ifs",
 ) -> "ArrayLike" | "xarray.DataArray" | "FieldList" | "Field":
     r"""Compute the relative humidity from dewpoint temperature.
 
@@ -1141,6 +1158,9 @@ def relative_humidity_from_dewpoint(
         Temperature (K)
     td: array-like | xarray.DataArray | FieldList | Field
         Dewpoint (K)
+    method: str, optional
+        Method of the saturation vapour pressure: "ifs", "huang" or "cosmo".
+        See :func:`saturation_vapour_pressure` for details.
 
     Returns
     -------
@@ -1171,7 +1191,7 @@ def relative_humidity_from_dewpoint(
     The function returns an object of the same type as the input arguments.
     """
     dispatched = dispatch(relative_humidity_from_dewpoint, array=True)
-    return dispatched(t, td)
+    return dispatched(t, td, method=method)
 
 
 @overload
@@ -1179,6 +1199,8 @@ def relative_humidity_from_specific_humidity(
     t: "ArrayLike",
     q: "ArrayLike",
     p: "ArrayLike",
+    phase: str = "mixed",
+    method: str = "ifs",
 ) -> "ArrayLike": ...
 
 
@@ -1187,6 +1209,8 @@ def relative_humidity_from_specific_humidity(
     t: "xarray.DataArray",
     q: "xarray.DataArray",
     p: "xarray.DataArray",
+    phase: str = "mixed",
+    method: str = "ifs",
 ) -> "xarray.DataArray": ...
 
 
@@ -1195,6 +1219,8 @@ def relative_humidity_from_specific_humidity(
     t: "FieldList",
     q: "FieldList",
     p: "FieldList",
+    phase: str = "mixed",
+    method: str = "ifs",
 ) -> "FieldList": ...
 
 
@@ -1203,6 +1229,8 @@ def relative_humidity_from_specific_humidity(
     t: "Field",
     q: "Field",
     p: "Field",
+    phase: str = "mixed",
+    method: str = "ifs",
 ) -> "Field": ...
 
 
@@ -1210,6 +1238,8 @@ def relative_humidity_from_specific_humidity(
     t: "ArrayLike" | "xarray.DataArray" | "FieldList" | "Field",
     q: "ArrayLike" | "xarray.DataArray" | "FieldList" | "Field",
     p: "ArrayLike" | "xarray.DataArray" | "FieldList" | "Field",
+    phase: str = "mixed",
+    method: str = "ifs",
 ) -> "ArrayLike" | "xarray.DataArray" | "FieldList" | "Field":
     r"""Compute the relative humidity from specific humidity.
 
@@ -1221,6 +1251,12 @@ def relative_humidity_from_specific_humidity(
         Specific humidity (kg/kg)
     p: array-like | xarray.DataArray | FieldList | Field
         Pressure (Pa)
+    phase: str, optional
+        Phase of the saturation vapour pressure: "mixed", "water" or "ice".
+        See :func:`saturation_vapour_pressure` for details.
+    method: str, optional
+        Method of the saturation vapour pressure: "ifs", "huang" or "cosmo".
+        See :func:`saturation_vapour_pressure` for details.
 
     Returns
     -------
@@ -1232,12 +1268,12 @@ def relative_humidity_from_specific_humidity(
 
     .. math::
 
-        r = 100 \frac {e(q, p)}{e_{msat}(t)}
+        r = 100 \frac {e(q, p)}{e_{sat}(t)}
 
     where:
 
         * :math:`e` is the vapour pressure (see :func:`vapour_pressure_from_specific_humidity`)
-        * :math:`e_{msat}` is the :func:`saturation_vapour_pressure` based on the \"mixed\" phase
+        * :math:`e_{sat}` is the :func:`saturation_vapour_pressure` with respect to ``phase``
 
 
     Implementations
@@ -1254,13 +1290,14 @@ def relative_humidity_from_specific_humidity(
     The function returns an object of the same type as the input arguments.
     """
     dispatched = dispatch(relative_humidity_from_specific_humidity, array=True)
-    return dispatched(t, q, p)
+    return dispatched(t, q, p, phase=phase, method=method)
 
 
 @overload
 def specific_humidity_from_dewpoint(
     td: "ArrayLike",
     p: "ArrayLike",
+    method: str = "ifs",
 ) -> "ArrayLike": ...
 
 
@@ -1268,6 +1305,7 @@ def specific_humidity_from_dewpoint(
 def specific_humidity_from_dewpoint(
     td: "xarray.DataArray",
     p: "xarray.DataArray",
+    method: str = "ifs",
 ) -> "xarray.DataArray": ...
 
 
@@ -1275,6 +1313,7 @@ def specific_humidity_from_dewpoint(
 def specific_humidity_from_dewpoint(
     td: "FieldList",
     p: "FieldList",
+    method: str = "ifs",
 ) -> "FieldList": ...
 
 
@@ -1282,12 +1321,14 @@ def specific_humidity_from_dewpoint(
 def specific_humidity_from_dewpoint(
     td: "Field",
     p: "Field",
+    method: str = "ifs",
 ) -> "Field": ...
 
 
 def specific_humidity_from_dewpoint(
     td: "ArrayLike" | "xarray.DataArray" | "FieldList" | "Field",
     p: "ArrayLike" | "xarray.DataArray" | "FieldList" | "Field",
+    method: str = "ifs",
 ) -> "ArrayLike" | "xarray.DataArray" | "FieldList" | "Field":
     r"""Compute the specific humidity from dewpoint.
 
@@ -1297,6 +1338,9 @@ def specific_humidity_from_dewpoint(
         Dewpoint (K)
     p: array-like | xarray.DataArray | FieldList | Field
         Pressure (Pa)
+    method: str, optional
+        Method of the saturation vapour pressure: "ifs", "huang" or "cosmo".
+        See :func:`saturation_vapour_pressure` for details.
 
     Returns
     -------
@@ -1333,7 +1377,7 @@ def specific_humidity_from_dewpoint(
     The function returns an object of the same type as the input arguments.
     """
     dispatched = dispatch(specific_humidity_from_dewpoint, array=True)
-    return dispatched(td, p)
+    return dispatched(td, p, method=method)
 
 
 @overload
