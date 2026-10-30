@@ -1775,6 +1775,192 @@ def interpolate_monotonic(
     )
 
 
+def _levels_first(xp, a, vertical_dim):
+    """Return ``a`` with its vertical axis moved to position 0."""
+    return a if vertical_dim == 0 else xp.moveaxis(a, vertical_dim, 0)
+
+
+def _target_levels(xp, target, nlev_shape, vertical_dim, name):
+    """Return ``target`` as ``[m, ...]`` plus a flag telling if it was a single level.
+
+    ``target`` may be a scalar, a 1D array of levels or an array with a vertical axis
+    at ``vertical_dim`` whose other axes match ``nlev_shape`` (the shape of one level).
+    The flag is True only for a scalar ``target``, see :func:`_restore`.
+    """
+    target = xp.asarray(target)
+    if target.ndim == 0:
+        return xp.broadcast_to(target, (1,) + tuple(nlev_shape)), True
+    if target.ndim == 1 and len(nlev_shape) > 0:
+        target = xp.reshape(target, (target.shape[0],) + (1,) * len(nlev_shape))
+        return xp.broadcast_to(target, (target.shape[0],) + tuple(nlev_shape)), False
+    target = _levels_first(xp, target, vertical_dim)
+    if tuple(target.shape[1:]) != tuple(nlev_shape):
+        raise ValueError(f"{name} shape {target.shape} does not match one level {tuple(nlev_shape)}")
+    return target, False
+
+
+def _restore(xp, out, single, vertical_dim):
+    """Undo :func:`_target_levels` on the result ``out`` shaped ``[m, ...]``."""
+    if single:
+        return out[0]
+    return out if vertical_dim == 0 else xp.moveaxis(out, 0, vertical_dim)
+
+
+def extrapolate_below_lowest_level(
+    data: ArrayLike,
+    z: ArrayLike,
+    target_z: ArrayLike,
+    mode: Literal["lapse_rate", "constant", "linear", "hydrostatic"] = "lapse_rate",
+    lapse_rate: ArrayLike = constants.standard_lapse_rate,
+    vertical_dim: int = 0,
+    start_z: ArrayLike | None = None,
+    start_value: ArrayLike | None = None,
+    t_start: ArrayLike | None = None,
+) -> ArrayLike:
+    r"""Extrapolate data to target heights below a start level, by default the lowest level.
+
+    *New in version 1.4.0*
+
+    Parameters
+    ----------
+    data : ArrayLike
+        Data on levels. The vertical axis is given by ``vertical_dim``.
+    z : ArrayLike
+        Height of the levels of ``data``. Either the same shape as ``data`` or 1D with one
+        value per level. The lowest level is the one with the smallest ``z`` in each column.
+    target_z : ArrayLike
+        Target heights, in the same units and with the same datum as ``z``. A scalar, a 1D
+        array of heights, or an array with a vertical axis at ``vertical_dim`` whose other
+        axes match one level of ``data``.
+    mode : {"lapse_rate", "constant", "linear", "hydrostatic"}, default="lapse_rate"
+        Extrapolation method, with :math:`\Delta z = z_{target} - z_{0} \le 0`, where
+        :math:`z_{0}` and :math:`d_{0}` are the height and data of the start level (by
+        default the lowest level) and :math:`z_{1}`, :math:`d_{1}` those of the level next
+        to the lowest level:
+
+        - "lapse_rate": :math:`d = d_{0} - \Gamma \Delta z`, meant for temperature
+        - "constant": :math:`d = d_{0}`
+        - "linear": :math:`d = d_{0} + \Delta z \frac{d_{1} - d_{0}}{z_{1} - z_{0}}`
+        - "hydrostatic": meant for pressure. The temperature is :math:`T_{0}` (``t_start``)
+          at the start level and changes with the lapse rate :math:`\Gamma`. With
+          :math:`a = -\Gamma \Delta z / T_{0}`:
+
+          - :math:`a < 10^{-4}` (isothermal; this includes every :math:`\Gamma \le 0`):
+            :math:`d = d_{0} \exp\left(-\frac{g}{R_{d} T_{0}} \Delta z\right)`
+          - otherwise: :math:`d = d_{0} \exp\left(\frac{g}{R_{d} \Gamma}
+            \ln(1 + a)\right)`, with :math:`\ln(1 + a)` computed in float64
+
+          ``lapse_rate=0`` gives the isothermal form everywhere. Where the exponent
+          would overflow the data type the result is nan.
+
+    lapse_rate : ArrayLike, default=:data:`earthkit.meteo.constants.standard_lapse_rate`
+        Lapse rate :math:`\Gamma` [K/m] for ``mode="lapse_rate"`` and ``mode="hydrostatic"``;
+        a positive value means the temperature decreases with height. A scalar or the shape
+        of one level of ``data``. Ignored by the other modes.
+    vertical_dim : int, default=0
+        Vertical axis of ``data``, ``z``, ``target_z`` and of the result.
+    start_z : ArrayLike|None, optional
+        Height of the start level, a scalar or the shape of one level of ``data``. When
+        given, ``start_value`` must be given too, and the start level replaces the lowest
+        level: the result is defined wherever ``target_z <= start_z``, even where model
+        levels lie below ``start_z``. ``data`` and ``z`` then only fix the shapes.
+        Not allowed with ``mode="linear"``.
+    start_value : ArrayLike|None, optional
+        Data at ``start_z``, a scalar or the shape of one level of ``data``.
+    t_start : ArrayLike|None, optional
+        Temperature [K] at the start level, a scalar or the shape of one level of ``data``.
+        Required by ``mode="hydrostatic"``, not allowed with the other modes.
+
+    Returns
+    -------
+    ArrayLike
+        The extrapolated data, shaped like ``target_z`` (one level for a scalar). Where the
+        target lies above the start level, or the target or the needed inputs are nan,
+        the result is nan, so it can be combined with :func:`interpolate_monotonic`.
+
+    Raises
+    ------
+    ValueError
+        If ``mode`` is unknown, ``mode="linear"`` and ``data`` has fewer than two levels or
+        ``start_z`` is given, only one of ``start_z`` and ``start_value`` is given, or
+        ``t_start`` is missing for ``mode="hydrostatic"`` or given for another mode.
+
+    Notes
+    -----
+    In the hydrostatic mode the term :math:`\ln(1 + a)` is evaluated in float64 for
+    accuracy and the result is cast back to the data type of ``data``. The result is nan
+    where the exponent would overflow the data type.
+    """
+    if mode not in ("lapse_rate", "constant", "linear", "hydrostatic"):
+        raise ValueError(f"mode must be 'lapse_rate', 'constant', 'linear' or 'hydrostatic', got {mode!r}")
+    if (start_z is None) != (start_value is None):
+        raise ValueError("start_z and start_value must be given together")
+    if mode == "linear" and start_z is not None:
+        raise ValueError("mode='linear' takes its gradient from the lowest levels and cannot use start_z")
+    if (mode == "hydrostatic") != (t_start is not None):
+        raise ValueError("t_start is required by mode='hydrostatic' and allowed only with it")
+    xp = array_namespace(data, z, target_z)
+    data = _levels_first(xp, xp.asarray(data), vertical_dim)
+    nlev = data.shape[0]
+    if mode == "linear" and nlev < 2:
+        raise ValueError("mode='linear' needs at least two levels")
+
+    target, single = _target_levels(xp, target_z, data.shape[1:], vertical_dim, "target_z")
+
+    def _level(a):
+        # a scalar or one level, as [1, ...] to broadcast against the targets
+        return xp.asarray(a, dtype=data.dtype, device=xp.device(data))[xp.newaxis]
+
+    if start_z is None:
+        z = xp.asarray(z)
+        if z.ndim == 1 and data.ndim > 1:
+            z = xp.reshape(z, (z.shape[0],) + (1,) * (data.ndim - 1))
+        else:
+            z = _levels_first(xp, z, vertical_dim)
+        z = xp.broadcast_to(z, data.shape)
+        z_fill = xp.where(xp.isnan(z), xp.asarray(xp.inf, dtype=z.dtype), z)
+        i0 = xp.argmin(z_fill, axis=0)[xp.newaxis]
+        z0 = xp.take_along_axis(z, i0, axis=0)
+        d0 = xp.take_along_axis(data, i0, axis=0)
+    else:
+        z0 = _level(start_z)
+        d0 = _level(start_value)
+    dz = target - z0
+
+    if mode == "constant":
+        out = xp.broadcast_to(d0, target.shape)
+    elif mode == "lapse_rate":
+        out = d0 - _level(lapse_rate) * dz
+    elif mode == "hydrostatic":
+        out = _hydrostatic(xp, d0, dz, _level(t_start), _level(lapse_rate))
+    else:
+        # the neighbour of the lowest level: above it in a monotonic column
+        i1 = xp.where(i0 == 0, i0 + 1, i0 - 1)
+        z1 = xp.take_along_axis(z, i1, axis=0)
+        d1 = xp.take_along_axis(data, i1, axis=0)
+        out = d0 + dz * ((d1 - d0) / (z1 - z0))
+
+    out = xp.where(dz <= 0, out, xp.asarray(xp.nan, dtype=out.dtype))
+    return _restore(xp, out, single, vertical_dim)
+
+
+def _hydrostatic(xp, d0, dz, t0, lapse_rate):
+    """Hydrostatic ``d0`` scaling of :func:`extrapolate_below_lowest_level`, see there."""
+    dtype = d0.dtype
+    rgrd = xp.asarray(constants.g / constants.Rd, dtype=dtype)
+    nan = xp.asarray(xp.nan, dtype=dtype)
+    with np.errstate(invalid="ignore", divide="ignore"):
+        arg_ct = -(rgrd / t0) * dz
+        a = dz * (-lapse_rate / t0)
+        coef = rgrd / lapse_rate
+        a64 = xp.astype(a, xp.float64)
+        arg_clr = xp.astype(xp.astype(coef, xp.float64) * xp.log1p(a64), dtype)
+        arg = xp.where(a < 1.0e-4, arg_ct, arg_clr)
+        max_arg = xp.asarray(float(np.log(xp.finfo(dtype).max)) - 1.0, dtype=dtype)
+        arg = xp.where(xp.abs(arg) >= max_arg, nan, arg)
+        return d0 * xp.exp(arg)
+
+
 _BELOW_SURFACE_H1 = 2000.0  # m
 _BELOW_SURFACE_H2 = 2500.0  # m
 _BELOW_SURFACE_T1 = 298.0  # K

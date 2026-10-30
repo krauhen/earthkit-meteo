@@ -1591,6 +1591,106 @@ def interpolate_sleve_to_theta_levels(
 
 
 @overload
+def extrapolate_below_lowest_level(
+    data: "ArrayLike",
+    z: "ArrayLike",
+    target_z: "ArrayLike",
+    mode: Literal["lapse_rate", "constant", "linear", "hydrostatic"] = "lapse_rate",
+    lapse_rate: "ArrayLike" = constants.standard_lapse_rate,
+    vertical_dim: int = 0,
+    start_z: "ArrayLike | None" = None,
+    start_value: "ArrayLike | None" = None,
+    t_start: "ArrayLike | None" = None,
+) -> "ArrayLike": ...
+
+
+@overload
+def extrapolate_below_lowest_level(
+    data: "xarray.DataArray",
+    z: "xarray.DataArray",
+    target_z: "xarray.DataArray | float",
+    mode: Literal["lapse_rate", "constant", "linear", "hydrostatic"] = "lapse_rate",
+    lapse_rate: "xarray.DataArray | float" = constants.standard_lapse_rate,
+    vertical_dim: str = "z",
+    start_z: "xarray.DataArray | float | None" = None,
+    start_value: "xarray.DataArray | float | None" = None,
+    t_start: "xarray.DataArray | float | None" = None,
+) -> "xarray.DataArray": ...
+
+
+def extrapolate_below_lowest_level(
+    data: "ArrayLike",
+    z: "ArrayLike",
+    target_z: "ArrayLike",
+    mode: Literal["lapse_rate", "constant", "linear", "hydrostatic"] = "lapse_rate",
+    lapse_rate: "ArrayLike" = constants.standard_lapse_rate,
+    vertical_dim: "int | str | None" = None,
+    start_z: "ArrayLike | None" = None,
+    start_value: "ArrayLike | None" = None,
+    t_start: "ArrayLike | None" = None,
+) -> "ArrayLike":
+    r"""Extrapolate data to target heights below a start level, by default the lowest level.
+
+    *New in version 1.4.0*
+
+    Parameters
+    ----------
+    data: array-like
+        Data on levels.
+    z: array-like
+        Height of the levels of ``data``.
+    target_z: array-like
+        Target heights, same units and datum as ``z``.
+    mode: str, optional
+        "lapse_rate" (default), "constant", "linear" or "hydrostatic" (pressure from a
+        start temperature and a lapse rate).
+    lapse_rate: array-like, optional
+        Lapse rate [K/m] for ``mode="lapse_rate"`` and ``mode="hydrostatic"`` (default:
+        :data:`earthkit.meteo.constants.standard_lapse_rate`).
+    vertical_dim: int | str, optional
+        Vertical axis: an int for array-like input (default 0), the name of the vertical
+        dimension for xarray input (default ``"z"``).
+    start_z, start_value: array-like, optional
+        Start level height and data, given together; they replace the lowest level, so the
+        result is defined wherever ``target_z <= start_z``. Not allowed with "linear".
+    t_start: array-like, optional
+        Temperature [K] at the start level; required by "hydrostatic" and only by it.
+
+    Returns
+    -------
+    array-like
+        Extrapolated data; nan where the target lies above the start level.
+
+    See :py:meth:`earthkit.meteo.vertical.array.extrapolate_below_lowest_level` for the
+    formulas.
+
+
+    Implementations
+    ---------------
+    :func:`extrapolate_below_lowest_level` calls one of the following implementations
+    depending on the type of the input arguments:
+
+    - :py:meth:`earthkit.meteo.vertical.array.extrapolate_below_lowest_level` for array-like
+    - :py:meth:`earthkit.meteo.vertical.xarray.extrapolate_below_lowest_level` for xarray.DataArray
+
+    The function returns an object of the same type as the ``data`` argument.
+
+    """
+    kwargs = {} if vertical_dim is None else {"vertical_dim": vertical_dim}
+    return dispatch(extrapolate_below_lowest_level, xarray=True, fieldlist=False, array=True)(
+        data,
+        z,
+        target_z,
+        mode=mode,
+        lapse_rate=lapse_rate,
+        start_z=start_z,
+        start_value=start_value,
+        t_start=t_start,
+        **kwargs,
+    )
+
+
+@overload
 def extrapolate_temperature_to_pressure_levels_below_surface(
     t_sfc: "ArrayLike",
     h_sfc: "ArrayLike",

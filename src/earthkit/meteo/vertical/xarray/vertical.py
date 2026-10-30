@@ -9,6 +9,8 @@
 
 from __future__ import annotations
 
+from typing import Literal
+
 import xarray as xr
 
 from earthkit.meteo import constants
@@ -264,3 +266,87 @@ def extrapolate_geopotential_to_pressure_levels_below_surface(
         "standard_name": "geopotential",
         "units": "m2 s-2",
     })
+
+
+def extrapolate_below_lowest_level(
+    data: xr.DataArray,
+    z: xr.DataArray,
+    target_z: xr.DataArray | float,
+    mode: Literal["lapse_rate", "constant", "linear", "hydrostatic"] = "lapse_rate",
+    lapse_rate: xr.DataArray | float = constants.standard_lapse_rate,
+    vertical_dim: str = "z",
+    start_z: xr.DataArray | float | None = None,
+    start_value: xr.DataArray | float | None = None,
+    t_start: xr.DataArray | float | None = None,
+) -> xr.DataArray:
+    r"""Extrapolate data to target heights below a start level, by default the lowest level.
+
+    Parameters
+    ----------
+    data : xr.DataArray
+        Data on levels, with the vertical dimension ``vertical_dim``.
+    z : xr.DataArray
+        Height of the levels. It can have only the vertical dimension.
+    target_z : xr.DataArray | float
+        Target heights, in the same units and with the same datum as ``z``. A float, a
+        DataArray without extra dimension (one target per column), or a DataArray with one
+        extra dimension, which is not a dimension of ``data`` and lists the target heights.
+    mode : {"lapse_rate", "constant", "linear", "hydrostatic"}, default="lapse_rate"
+        Extrapolation method.
+    lapse_rate : xr.DataArray | float
+        Lapse rate [K/m] for ``mode="lapse_rate"`` and ``mode="hydrostatic"``.
+    vertical_dim : str, default="z"
+        Name of the vertical dimension of ``data``, ``z`` and ``target_z``.
+    start_z, start_value, t_start : xr.DataArray | float, optional
+        Height, data and temperature of the start level, without ``vertical_dim``.
+
+    Returns
+    -------
+    xr.DataArray
+        The extrapolated data, without ``vertical_dim``. It has the extra dimension of
+        ``target_z``, if there is one.
+
+    See :func:`earthkit.meteo.vertical.array.extrapolate_below_lowest_level`
+    for the definition.
+    """
+    squeeze = None
+    if not isinstance(target_z, xr.DataArray):
+        target_in, tcore, ocore = target_z, [], []
+    else:
+        extra = [d for d in target_z.dims if d not in data.dims]
+        if len(extra) > 1:
+            raise ValueError(f"target_z has more than one extra dimension: {extra}")
+        if not extra:
+            squeeze = "_target_level"
+            target_z = target_z.expand_dims(squeeze)
+            extra = [squeeze]
+        ref = data.isel({vertical_dim: 0}, drop=True)
+        target_in, tcore, ocore = target_z.broadcast_like(ref), extra, extra
+
+    def _f(data, z, target, *rest):
+        sz, sv, ts, lr = rest
+        return array.extrapolate_below_lowest_level(
+            data,
+            z,
+            target,
+            mode=mode,
+            lapse_rate=lr,
+            vertical_dim=-1,
+            start_z=sz,
+            start_value=sv,
+            t_start=ts,
+        )
+
+    out = xr.apply_ufunc(
+        _f,
+        data,
+        z,
+        target_in,
+        start_z,
+        start_value,
+        t_start,
+        lapse_rate,
+        input_core_dims=[[vertical_dim], [vertical_dim], tcore, [], [], [], []],
+        output_core_dims=[ocore],
+    )
+    return out if squeeze is None else out.squeeze(squeeze, drop=True)

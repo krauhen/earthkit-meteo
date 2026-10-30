@@ -600,3 +600,142 @@ def test_height_on_hybrid_levels(vertical, index, xp, device, h_type, h_referenc
     tolerance = Tolerance({64: (1e-8, 1e-6), 32: (10, 1e-6)})
     atol, rtol = tolerance.get(dtype=t.dtype)
     assert xp.allclose(h, h_ref, atol=atol, rtol=rtol), f"max abs diff={xp.max(xp.abs(h - h_ref))}"
+
+
+from earthkit.meteo import constants
+
+# column of 3 levels, top first; a second column is the first shifted by 100 m
+_EXTRAP_Z = [[3000.0, 3100.0], [2000.0, 2100.0], [1000.0, 1100.0]]
+_EXTRAP_T = [[260.0, 262.0], [270.0, 271.0], [280.0, 284.0]]
+
+
+@pytest.mark.parametrize("xp, device", NAMESPACE_DEVICES)
+@pytest.mark.parametrize(
+    "mode,target_z,expected",
+    [
+        ("constant", [500.0, 600.0], [280.0, 284.0]),
+        ("linear", [500.0, 600.0], [285.0, 290.5]),
+        ("lapse_rate", [500.0, 600.0], [283.25, 287.25]),
+        ("lapse_rate", [1000.0, 1100.0], [280.0, 284.0]),
+        ("lapse_rate", [1500.0, np.nan], [np.nan, np.nan]),
+    ],
+)
+def test_extrapolate_below_lowest_level(vertical, mode, target_z, expected, xp, device):
+    data = xp.asarray(_EXTRAP_T, device=device)
+    z = xp.asarray(_EXTRAP_Z, device=device)
+    target_z = xp.asarray(target_z, device=device)
+    expected = xp.asarray(expected, device=device)
+
+    r = vertical.extrapolate_below_lowest_level(data, z, target_z[xp.newaxis], mode=mode)
+    assert r.shape == (1, 2)
+    assert xp.allclose(r[0], expected, equal_nan=True)
+
+
+@pytest.mark.parametrize("xp, device", NAMESPACE_DEVICES)
+def test_extrapolate_below_lowest_level_shapes(vertical, xp, device):
+    # levels bottom first, on the last axis, 1D z, scalar and 1D targets
+    data = xp.asarray([[280.0, 270.0, 260.0], [284.0, 271.0, 262.0]], device=device)
+    z = xp.asarray([1000.0, 2000.0, 3000.0], device=device)
+
+    r = vertical.extrapolate_below_lowest_level(data, z, 0.0, vertical_dim=1)
+    assert xp.allclose(r, xp.asarray([286.5, 290.5], device=device))
+
+    r = vertical.extrapolate_below_lowest_level(data, z, [0.0, 1500.0], mode="linear", vertical_dim=1)
+    assert r.shape == (2, 2)
+    assert xp.allclose(r, xp.asarray([[290.0, np.nan], [297.0, np.nan]], device=device), equal_nan=True)
+
+
+def test_extrapolate_below_lowest_level_bad_mode(vertical):
+    with pytest.raises(ValueError):
+        vertical.extrapolate_below_lowest_level(np.zeros(3), np.arange(3.0), 0.0, mode="hydstat")
+    with pytest.raises(ValueError):
+        vertical.extrapolate_below_lowest_level(np.zeros(1), np.zeros(1), 0.0, mode="linear")
+
+
+_HYD_P0 = [90000.0, 89000.0]
+_HYD_T0 = [280.0, 270.0]
+_HYD_DZ = -500.0  # targets 500 m below a start level at 1000 m / 1100 m
+
+
+def _hyd_ct(p0, t0):
+    return p0 * np.exp(-constants.g / (constants.Rd * t0) * _HYD_DZ)
+
+
+def _hyd_clr(p0, t0, gamma):
+    return p0 * (1.0 - gamma * _HYD_DZ / t0) ** (constants.g / (constants.Rd * gamma))
+
+
+@pytest.mark.parametrize("xp, device", NAMESPACE_DEVICES)
+@pytest.mark.parametrize(
+    "lapse_rate,expected",
+    [
+        (0.0, [_hyd_ct(p, t) for p, t in zip(_HYD_P0, _HYD_T0)]),
+        (0.0065, [_hyd_clr(p, t, 0.0065) for p, t in zip(_HYD_P0, _HYD_T0)]),
+        # an inversion takes the isothermal form
+        (-0.01, [_hyd_ct(p, t) for p, t in zip(_HYD_P0, _HYD_T0)]),
+    ],
+)
+def test_extrapolate_below_lowest_level_hydrostatic(vertical, lapse_rate, expected, xp, device):
+    data = xp.asarray(_EXTRAP_T, device=device)
+    z = xp.asarray(_EXTRAP_Z, device=device)
+    start_z = xp.asarray([1000.0, 1100.0], device=device)
+    target_z = start_z + _HYD_DZ
+
+    r = vertical.extrapolate_below_lowest_level(
+        data,
+        z,
+        target_z[xp.newaxis],
+        mode="hydrostatic",
+        lapse_rate=lapse_rate,
+        start_z=start_z,
+        start_value=xp.asarray(_HYD_P0, device=device),
+        t_start=xp.asarray(_HYD_T0, device=device),
+    )
+    assert r.shape == (1, 2)
+    assert xp.allclose(r[0], xp.asarray(expected, device=device), rtol=1e-6)
+
+
+@pytest.mark.parametrize("xp, device", NAMESPACE_DEVICES)
+def test_extrapolate_below_lowest_level_start_above_lowest(vertical, xp, device):
+    # start level 500 m above the lowest model level: it overrides the model values below it
+    data = xp.asarray(_EXTRAP_T, device=device)
+    z = xp.asarray(_EXTRAP_Z, device=device)
+    start_z = xp.asarray([1500.0, 1600.0], device=device)
+    start_value = xp.asarray([275.0, 279.0], device=device)
+    target_z = xp.asarray([[1200.0, 1700.0], [500.0, 600.0]], device=device)
+
+    r = vertical.extrapolate_below_lowest_level(
+        data, z, target_z, mode="constant", start_z=start_z, start_value=start_value
+    )
+    assert xp.allclose(r, xp.asarray([[275.0, np.nan], [275.0, 279.0]], device=device), equal_nan=True)
+
+    vgrad = xp.asarray([-0.01, 0.002], device=device)
+    r = vertical.extrapolate_below_lowest_level(
+        data, z, target_z, lapse_rate=-vgrad, start_z=start_z, start_value=start_value
+    )
+    assert xp.allclose(r, xp.asarray([[278.0, np.nan], [285.0, 277.0]], device=device), equal_nan=True)
+
+
+def test_extrapolate_below_lowest_level_bad_combinations(vertical):
+    data, z = np.zeros(3), np.arange(3.0)
+    with pytest.raises(ValueError):
+        vertical.extrapolate_below_lowest_level(data, z, 0.0, start_z=1.0)
+    with pytest.raises(ValueError):
+        vertical.extrapolate_below_lowest_level(data, z, 0.0, start_value=1.0)
+    with pytest.raises(ValueError):
+        vertical.extrapolate_below_lowest_level(data, z, 0.0, mode="linear", start_z=1.0, start_value=1.0)
+    with pytest.raises(ValueError):
+        vertical.extrapolate_below_lowest_level(data, z, 0.0, mode="hydrostatic")
+    with pytest.raises(ValueError):
+        vertical.extrapolate_below_lowest_level(data, z, 0.0, mode="constant", t_start=280.0)
+
+
+@pytest.mark.parametrize("xp, device", NAMESPACE_DEVICES)
+@pytest.mark.parametrize("dtype", ["float64", "float32"])
+@pytest.mark.parametrize("mode", ["lapse_rate", "constant", "linear"])
+def test_extrapolate_below_lowest_level_dtype(vertical, xp, device, dtype, mode):
+    data = xp.asarray([[280.0, 281.0], [275.0, 276.0], [270.0, 271.0]], dtype=dtype, device=device)
+    z = xp.asarray([100.0, 600.0, 1100.0], dtype=dtype, device=device)
+    r = vertical.extrapolate_below_lowest_level(data, z, xp.asarray([0.0], dtype=dtype, device=device), mode=mode)
+    assert r.dtype == data.dtype
+    assert r.shape == (1, 2)
