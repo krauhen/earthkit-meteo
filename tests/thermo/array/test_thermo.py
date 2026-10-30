@@ -1068,3 +1068,57 @@ def test_specific_gas_constant(q, v_ref, xp, device):
     q, v_ref = xp.asarray(q, device=device), xp.asarray(v_ref, device=device)
     r = thermo.array.specific_gas_constant(q)
     assert xp.allclose(r, v_ref)
+
+
+@pytest.mark.parametrize("xp, device", NAMESPACE_DEVICES)
+def test_ept_cosmo_specific_humidity(xp, device):
+    # theta_e = theta * exp(Lv * w / (c_pd * t)), with w = q / (1 - q)
+    t = xp.asarray([253.15, 273.15, 293.15, 303.15], device=device)
+    q = xp.asarray([0.0005, 0.004, 0.01, 0.02], device=device)
+    p = xp.asarray([70000.0, 85000.0, 85000.0, 100000.0], device=device)
+
+    w = q / (1.0 - q)
+    theta = t * (1e5 / p) ** constants.kappa
+    v_ref = theta * xp.exp(constants.Lv * w / (constants.c_pd * t))
+
+    pt = thermo.array.ept_from_specific_humidity(t, q, p, method="cosmo")
+    assert xp.allclose(pt, v_ref, rtol=1e-12, atol=0)
+
+
+@pytest.mark.parametrize("xp, device", NAMESPACE_DEVICES)
+def test_ept_cosmo_dewpoint(xp, device):
+    # w = epsilon * e / (p - e), with e the saturation vapour pressure over water at td
+    t = xp.asarray([253.15, 273.15, 293.15, 303.15], device=device)
+    td = xp.asarray([250.15, 270.15, 285.15, 295.15], device=device)
+    p = xp.asarray([70000.0, 85000.0, 85000.0, 100000.0], device=device)
+
+    e = thermo.array.saturation_vapour_pressure(td, phase="water")
+    w = constants.epsilon * e / (p - e)
+    theta = t * (1e5 / p) ** constants.kappa
+    v_ref = theta * xp.exp(constants.Lv * w / (constants.c_pd * t))
+
+    pt = thermo.array.ept_from_dewpoint(t, td, p, method="cosmo")
+    assert xp.allclose(pt, v_ref, rtol=1e-12, atol=0)
+
+
+@pytest.mark.parametrize("xp, device", NAMESPACE_DEVICES)
+def test_ept_cosmo_float32(xp, device):
+    t = xp.asarray([293.15], dtype=xp.float32, device=device)
+    q = xp.asarray([0.01], dtype=xp.float32, device=device)
+    p = xp.asarray([85000.0], dtype=xp.float32, device=device)
+    assert thermo.array.ept_from_specific_humidity(t, q, p, method="cosmo").dtype == xp.float32
+
+
+@pytest.mark.parametrize("xp, device", NAMESPACE_DEVICES)
+def test_cosmo_ept_not_supported(xp, device):
+    t = xp.asarray([293.15], device=device)
+    q = xp.asarray([0.01], device=device)
+    p = xp.asarray([85000.0], device=device)
+    with pytest.raises(NotImplementedError):
+        thermo.array.saturation_ept(t, p, method="cosmo")
+    with pytest.raises(NotImplementedError):
+        thermo.array.wet_bulb_temperature_from_specific_humidity(t, q, p, ept_method="cosmo")
+    with pytest.raises(NotImplementedError):
+        thermo.array.wet_bulb_potential_temperature_from_specific_humidity(t, q, p, ept_method="cosmo")
+    with pytest.raises(NotImplementedError):
+        thermo.array.temperature_on_moist_adiabat(t, p, ept_method="cosmo")

@@ -1367,11 +1367,43 @@ class _EptCompBolton43(_EptComp):
         raise NotImplementedError("compute_t_on_ma_davies is not implemented for Bolton43 method!")
 
 
+class _EptCompCosmo(_EptComp):
+    # Only compute_ept is defined: the saturation ept, the wet-bulb relation and the moist-adiabat
+    # inversions are tied to the formulas of the other methods (as for "bolton43").
+    def __init__(self):
+        self.K0 = constants.Lv / constants.c_pd
+
+    def compute_ept(self, t=None, td=None, q=None, p=None):
+        if td is None and q is None:
+            raise ValueError("ept: either td or q must have a valid value!")
+
+        if q is None:
+            w = mixing_ratio_from_dewpoint(td, p)
+        else:
+            w = mixing_ratio_from_specific_humidity(q)
+
+        xp = array_namespace(t, w, p)
+        return potential_temperature(t, p) * xp.exp(self.K0 * w / t)
+
+    def compute_ept_sat(self, t, p):
+        raise NotImplementedError("compute_ept_sat is not implemented for cosmo method!")
+
+    def compute_wbpt(self, ept):
+        raise NotImplementedError("compute_wbpt is not implemented for cosmo method!")
+
+    def compute_t_on_ma_stipanuk(self, ept, p):
+        raise NotImplementedError("compute_t_on_ma_stipanuk is not implemented for cosmo method!")
+
+    def compute_t_on_ma_davies(self, ept, p):
+        raise NotImplementedError("compute_t_on_ma_davies is not implemented for cosmo method!")
+
+
 _EptComp.CM = {
     "ifs": _EptCompIfs,
     "bolton35": _EptCompBolton35,
     "bolton39": _EptCompBolton39,
     "bolton43": _EptCompBolton43,
+    "cosmo": _EptCompCosmo,
 }
 
 
@@ -1387,7 +1419,8 @@ def ept_from_dewpoint(t: ArrayLike, td: ArrayLike, p: ArrayLike, method: str = "
     p: number or array-like
         Pressure (Pa)
     method: str, optional
-        Specify the computation method. The possible values are: "ifs", "bolton35", "bolton39", "bolton43".
+        Specify the computation method. The possible values are: "ifs", "bolton35", "bolton39",
+        "bolton43", "cosmo".
 
     Returns
     -------
@@ -1426,6 +1459,13 @@ def ept_from_dewpoint(t: ArrayLike, td: ArrayLike, p: ArrayLike, method: str = "
             t (\frac{10^{5}}{p})^{\kappa (1-0.28 w)} exp[(\frac{3376}{t_{LCL}} -
             2.54)w(1+0.81w)]
 
+    * "cosmo": the equivalent potential temperature is computed from the temperature and the
+      mixing ratio, without the lifting condensation level:
+
+        .. math::
+
+            \Theta_{e} = \Theta  exp(\frac{L_{v}  w}{c_{pd}  t})
+
     where:
 
         * :math:`\Theta` is the :func:`potential_temperature`
@@ -1435,6 +1475,7 @@ def ept_from_dewpoint(t: ArrayLike, td: ArrayLike, p: ArrayLike, method: str = "
 
             * method="davis" when ``method`` is "ifs"
             * method="bolton" when ``method`` is "bolton35", "bolton39", or "bolton43"
+              (not used by "cosmo")
         * :math:`q` is the specific humidity computed with :func:`specific_humidity_from_dewpoint`
         * :math:`w`: is the mixing ratio computed with :func:`mixing_ratio_from_dewpoint`
         * :math:`e` is the vapour pressure computed with :func:`vapour_pressure_from_mixing_ratio`
@@ -1461,7 +1502,7 @@ def ept_from_specific_humidity(t: ArrayLike, q: ArrayLike, p: ArrayLike, method:
         Pressure (Pa)
     method: str, optional
         Specify the computation method. The possible values are: "ifs",
-        "bolton35", "bolton39", "bolton43". See :func:`ept_from_dewpoint` for details.
+        "bolton35", "bolton39", "bolton43", "cosmo". See :func:`ept_from_dewpoint` for details.
 
     Returns
     -------
@@ -1487,6 +1528,7 @@ def saturation_ept(t: ArrayLike, p: ArrayLike, method: str = "ifs") -> ArrayLike
         Pressure (Pa)
     method: str, optional
         Specifies the computation method. The possible values are: "ifs", "bolton35", "bolton39".
+        The "cosmo" method is not supported here (NotImplementedError).
 
     Returns
     -------
@@ -1547,6 +1589,7 @@ def temperature_on_moist_adiabat(
     ept_method: str, optional
         Specifies the computation method that was used to compute ``ept``. The possible
         values are: "ifs", "bolton35", "bolton39".
+        The "cosmo" method is not supported here (NotImplementedError).
         (See :func:`ept_from_dewpoint` for details.)
     t_method: str, optional
         Specifies the iteration method along the moist adiabat to find the temperature
@@ -1595,6 +1638,7 @@ def wet_bulb_temperature_from_dewpoint(
     ept_method: str, optional
         Specifies the computation method for the equivalent potential temperature.
         The possible values are: "ifs", "bolton35", "bolton39".
+        The "cosmo" method is not supported here (NotImplementedError).
         (See :func:`ept_from_dewpoint` for details.)
     t_method: str, optional
         Specifies the method to find the temperature along the moist adiabat defined
@@ -1641,6 +1685,7 @@ def wet_bulb_temperature_from_specific_humidity(
     ept_method: str, optional
         Specifies the computation method for the equivalent potential temperature.
         The possible values are: "ifs", "bolton35", "bolton39".
+        The "cosmo" method is not supported here (NotImplementedError).
         (See :func:`ept_from_dewpoint` for details.)
     t_method: str, optional
         Specifies the method to find the temperature along the moist adiabat
@@ -1688,6 +1733,7 @@ def wet_bulb_potential_temperature_from_dewpoint(
     ept_method: str, optional
         Specifies the computation method for the equivalent potential temperature.
         The possible values are: "ifs", "bolton35", "bolton39".
+        The "cosmo" method is not supported here (NotImplementedError).
         (See :func:`ept_from_dewpoint` for details.)
     t_method: str, optional
         Specifies the method to find the temperature along the moist adiabat defined
@@ -1738,6 +1784,7 @@ def wet_bulb_potential_temperature_from_specific_humidity(
     ept_method: str, optional
         Specifies the computation method for the equivalent potential temperature.
         The possible values are: "ifs", "bolton35", "bolton39".
+        The "cosmo" method is not supported here (NotImplementedError).
         (See :func:`ept_from_dewpoint` for details.)
     t_method: str, optional
         Specifies the method to find the temperature along the moist adiabat

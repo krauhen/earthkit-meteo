@@ -476,6 +476,7 @@ def test_xr_lcl(t, td, p, method):
         (293.15, 283.15, 100000.0, "ifs"),
         (293.15, 283.15, 100000.0, "bolton35"),
         (293.15, 283.15, 100000.0, "bolton39"),
+        (293.15, 283.15, 100000.0, "cosmo"),
     ],
 )
 def test_xr_ept_from_dewpoint(t, td, p, method):
@@ -492,6 +493,7 @@ def test_xr_ept_from_dewpoint(t, td, p, method):
     "t,q,p,method",
     [
         (293.15, 0.01, 100000.0, "ifs"),
+        (293.15, 0.01, 100000.0, "cosmo"),
     ],
 )
 def test_xr_ept_from_specific_humidity(t, q, p, method):
