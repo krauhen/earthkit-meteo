@@ -600,3 +600,71 @@ def test_height_on_hybrid_levels(vertical, index, xp, device, h_type, h_referenc
     tolerance = Tolerance({64: (1e-8, 1e-6), 32: (10, 1e-6)})
     atol, rtol = tolerance.get(dtype=t.dtype)
     assert xp.allclose(h, h_ref, atol=atol, rtol=rtol), f"max abs diff={xp.max(xp.abs(h - h_ref))}"
+
+
+_ISO_Z = [9000.0, 6000.0, 3000.0, 2000.0, 1000.0, 0.0]
+
+
+@pytest.mark.parametrize("xp, device", NAMESPACE_DEVICES)
+@pytest.mark.parametrize(
+    "t,expected",
+    [
+        ([288.15 - 0.0065 * z for z in _ISO_Z], 15.0 / 0.0065),  # linear lapse column
+        ([300.0] * 6, np.nan),  # warmer throughout
+        ([250.0] * 6, np.nan),  # colder throughout
+        ([230.0, 250.0, 275.0, 270.0, 268.0, 280.0], 3000.0 + 3000.0 * 1.85 / 25.0),  # inversion: highest
+    ],
+)
+def test_height_of_isotherm(vertical, t, expected, xp, device):
+    t = xp.asarray(t, device=device)
+    z = xp.asarray(_ISO_Z, device=device)
+
+    r = vertical.height_of_isotherm(t, z, z_max=8000.0)
+    assert xp.allclose(r, xp.asarray(expected, device=device), equal_nan=True)
+    r = vertical.height_of_isotherm(t, z)
+    assert xp.allclose(r, xp.asarray(expected, device=device), equal_nan=True)
+
+
+@pytest.mark.parametrize("xp, device", NAMESPACE_DEVICES)
+def test_height_of_isotherm_options(vertical, xp, device):
+    # two columns, levels bottom first on the last axis
+    z = xp.asarray(
+        [[1000.0, 2000.0, 3000.0, 6000.0, 9000.0], [1500.0, 2500.0, 3500.0, 6500.0, 9500.0]],
+        device=device,
+    )
+    t = xp.asarray([[270.0, 265.0, 260.0, 250.0, 230.0], [280.0, 270.0, 260.0, 250.0, 230.0]], device=device)
+
+    r = vertical.height_of_isotherm(t, z, z_max=8000.0, vertical_dim=1)
+    assert xp.allclose(r, xp.asarray([np.nan, 2185.0], device=device), equal_nan=True)
+
+    r = vertical.height_of_isotherm(t, z, z_max=8000.0, extrapolate=True, vertical_dim=1)
+    assert xp.allclose(r, xp.asarray([370.0, 2185.0], device=device))
+
+    # no level 8000 m above the surface
+    zs = xp.asarray([2000.0, 0.0], device=device)
+    r = vertical.height_of_isotherm(t, z, z_max=8000.0, zs=zs, vertical_dim=1)
+    assert xp.allclose(r, xp.asarray([np.nan, 2185.0], device=device), equal_nan=True)
+
+
+def test_height_of_isotherm_bad_order(vertical):
+    z = np.asarray([[0.0, 1000.0], [1000.0, 0.0]])
+    with pytest.raises(ValueError):
+        vertical.height_of_isotherm(np.full((2, 2), 270.0), z)
+
+
+@pytest.mark.parametrize("xp, device", NAMESPACE_DEVICES)
+@pytest.mark.parametrize("dtype", ["float64", "float32"])
+def test_height_of_isotherm_order_dtype(vertical, xp, device, dtype):
+    # top first and bottom first give the same result, and the dtype is kept
+    t = [230.0, 250.0, 275.0, 270.0, 268.0, 280.0]
+    t1 = xp.asarray(t, dtype=dtype, device=device)
+    z1 = xp.asarray(_ISO_Z, dtype=dtype, device=device)
+    r1 = vertical.height_of_isotherm(t1, z1)
+    r2 = vertical.height_of_isotherm(xp.flip(t1, axis=0), xp.flip(z1, axis=0))
+    assert r1.dtype == t1.dtype
+    assert xp.allclose(r1, r2)
+    # t with columns, z 1D
+    tc = xp.stack([t1, t1], axis=1)
+    rc = vertical.height_of_isotherm(tc, z1)
+    assert rc.shape == (2,)
+    assert xp.allclose(rc, xp.stack([r1, r1]))

@@ -1591,6 +1591,87 @@ def interpolate_sleve_to_theta_levels(
 
 
 @overload
+def height_of_isotherm(
+    t: "ArrayLike",
+    z: "ArrayLike",
+    t_target: float = constants.T_C2K,
+    z_max: float | None = None,
+    zs: "ArrayLike | None" = None,
+    extrapolate: bool = False,
+    vertical_dim: int = 0,
+) -> "ArrayLike": ...
+
+
+@overload
+def height_of_isotherm(
+    t: "xarray.DataArray",
+    z: "xarray.DataArray",
+    t_target: float = constants.T_C2K,
+    z_max: float | None = None,
+    zs: "xarray.DataArray | None" = None,
+    extrapolate: bool = False,
+    vertical_dim: str = "z",
+) -> "xarray.DataArray": ...
+
+
+def height_of_isotherm(
+    t: "ArrayLike | xarray.DataArray",
+    z: "ArrayLike | xarray.DataArray",
+    t_target: float = constants.T_C2K,
+    z_max: float | None = None,
+    zs: "ArrayLike | xarray.DataArray | None" = None,
+    extrapolate: bool = False,
+    vertical_dim: "int | str | None" = None,
+) -> "ArrayLike | xarray.DataArray":
+    r"""Height where the temperature first reaches ``t_target`` when going down a column.
+
+    *New in version 1.4.0*
+
+    Parameters
+    ----------
+    t : array-like | xarray.DataArray
+        Temperature on levels [K].
+    z : array-like | xarray.DataArray
+        Height of the levels [m], monotonic along the vertical axis.
+    t_target : float, default=:data:`earthkit.meteo.constants.T_C2K`
+        Temperature of the isotherm [K] (default: 0 degC).
+    z_max : float or None, default=None
+        Height [m] above ``zs`` where the search starts. ``None`` starts at the top level.
+    zs : array-like | xarray.DataArray, optional
+        Surface height [m]. ``None`` measures ``z_max`` from the datum of ``z``.
+    extrapolate : bool, default=False
+        Extrapolate below the lowest level when no crossing is found.
+    vertical_dim : int | str, optional
+        Vertical axis: an int for array-like input (default 0), the name of the vertical
+        dimension for xarray input (default ``"z"``).
+
+    Returns
+    -------
+    array-like | xarray.DataArray
+        Height of the isotherm [m]; nan where no crossing is found.
+
+    See Also
+    --------
+    earthkit.meteo.vertical.array.height_of_isotherm
+
+
+    Implementations
+    ---------------
+    :func:`height_of_isotherm` calls one of the following implementations
+    depending on the type of the input arguments:
+
+    - :py:meth:`earthkit.meteo.vertical.array.height_of_isotherm` for array-like
+    - :py:meth:`earthkit.meteo.vertical.xarray.height_of_isotherm` for xarray.DataArray
+
+    The function returns an object of the same type as the ``t`` argument.
+    """
+    kwargs = {} if vertical_dim is None else {"vertical_dim": vertical_dim}
+    return dispatch(height_of_isotherm, xarray=True, fieldlist=False, array=True)(
+        t, z, t_target=t_target, z_max=z_max, zs=zs, extrapolate=extrapolate, **kwargs
+    )
+
+
+@overload
 def extrapolate_temperature_to_pressure_levels_below_surface(
     t_sfc: "ArrayLike",
     h_sfc: "ArrayLike",

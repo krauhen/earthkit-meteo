@@ -264,3 +264,59 @@ def extrapolate_geopotential_to_pressure_levels_below_surface(
         "standard_name": "geopotential",
         "units": "m2 s-2",
     })
+
+
+def height_of_isotherm(
+    t: xr.DataArray,
+    z: xr.DataArray,
+    t_target: float = constants.T_C2K,
+    z_max: float | None = None,
+    zs: xr.DataArray | None = None,
+    extrapolate: bool = False,
+    vertical_dim: str = "z",
+) -> xr.DataArray:
+    r"""Height where the temperature first reaches ``t_target`` when going down a column.
+
+    Parameters
+    ----------
+    t : xr.DataArray
+        Temperature on levels [K].
+    z : xr.DataArray
+        Height of the levels [m], monotonic along ``vertical_dim``. It can have only the
+        vertical dimension.
+    t_target : float, default=:data:`earthkit.meteo.constants.T_C2K`
+        Temperature of the isotherm [K].
+    z_max : float or None, default=None
+        Height [m] above ``zs`` where the search starts. ``None`` starts at the top level.
+    zs : xr.DataArray, optional
+        Surface height [m].
+    extrapolate : bool, default=False
+        Extrapolate below the lowest level when no crossing is found.
+    vertical_dim : str, default="z"
+        Name of the vertical dimension of ``t`` and ``z``.
+
+    Returns
+    -------
+    xr.DataArray
+        Height of the isotherm [m], without ``vertical_dim``.
+
+    See :func:`earthkit.meteo.vertical.array.height_of_isotherm`
+    for the definition.
+    """
+
+    def _f(t, z, *zs_):
+        return array.height_of_isotherm(
+            t,
+            z,
+            t_target=t_target,
+            z_max=z_max,
+            zs=zs_[0] if zs_ else None,
+            extrapolate=extrapolate,
+            vertical_dim=-1,
+        )
+
+    args = [t, z] if zs is None else [t, z, zs]
+    core = [[vertical_dim], [vertical_dim]] + ([] if zs is None else [[]])
+    return xr.apply_ufunc(_f, *args, input_core_dims=core, output_core_dims=[[]]).assign_attrs({
+        "units": "m",
+    })

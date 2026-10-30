@@ -60,3 +60,24 @@ def test_high_level_extrapolate_to_pressure_levels_below_surface_dispatch(input_
     if input_type == "fieldlist":
         assert res.get("vertical.level_type") == ["pressure"]
         assert res.get("vertical.level") == [1050.0]
+
+
+@pytest.mark.parametrize("input_type", ["numpy", "xarray"])
+def test_high_level_height_of_isotherm_dispatch(input_type):
+    import numpy as np
+
+    z = np.array([9000.0, 6000.0, 3000.0, 2000.0, 1000.0, 0.0])
+    t = np.array([[230.0, 250.0, 275.0, 270.0, 268.0, 280.0], [250.0] * 6]).T
+
+    if input_type == "numpy":
+        expected_type = np.ndarray
+        args = (t, z)
+    else:
+        xr = pytest.importorskip("xarray")
+        expected_type = xr.DataArray
+        args = (xr.DataArray(t, dims=("z", "cell")), xr.DataArray(z, dims="z"))
+
+    res = vertical_high_level.height_of_isotherm(*args, z_max=8000.0)
+
+    assert isinstance(res, expected_type)
+    np.testing.assert_allclose(np.asarray(res), [3000.0 + 3000.0 * 1.85 / 25.0, np.nan])
