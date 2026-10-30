@@ -125,7 +125,7 @@ def test_xr_mixing_ratio_from_vapour_pressure(e, p):
         assert out.ndim == 0
 
 
-@pytest.mark.parametrize("method", ["ifs", "huang"])
+@pytest.mark.parametrize("method", ["ifs", "huang", "cosmo"])
 @pytest.mark.parametrize(
     "t,phase",
     [
@@ -143,7 +143,7 @@ def test_xr_saturation_vapour_pressure(t, phase, method):
     assert out.attrs["method"] == method
 
 
-@pytest.mark.parametrize("method", ["ifs", "huang"])
+@pytest.mark.parametrize("method", ["ifs", "huang", "cosmo"])
 @pytest.mark.parametrize(
     "t,p,phase",
     [
@@ -160,7 +160,7 @@ def test_xr_saturation_mixing_ratio(t, p, phase, method):
     assert out.attrs["method"] == method
 
 
-@pytest.mark.parametrize("method", ["ifs", "huang"])
+@pytest.mark.parametrize("method", ["ifs", "huang", "cosmo"])
 @pytest.mark.parametrize(
     "t,p,phase",
     [
@@ -177,7 +177,7 @@ def test_xr_saturation_specific_humidity(t, p, phase, method):
     assert out.attrs["method"] == method
 
 
-@pytest.mark.parametrize("method", ["ifs", "huang"])
+@pytest.mark.parametrize("method", ["ifs", "huang", "cosmo"])
 @pytest.mark.parametrize(
     "t,phase",
     [
@@ -193,7 +193,7 @@ def test_xr_saturation_vapour_pressure_slope(t, phase, method):
     assert out.attrs["method"] == method
 
 
-@pytest.mark.parametrize("method", ["ifs", "huang"])
+@pytest.mark.parametrize("method", ["ifs", "huang", "cosmo"])
 @pytest.mark.parametrize(
     "t,p,phase",
     [
@@ -210,7 +210,7 @@ def test_xr_saturation_mixing_ratio_slope(t, p, phase, method):
     assert out.attrs["method"] == method
 
 
-@pytest.mark.parametrize("method", ["ifs", "huang"])
+@pytest.mark.parametrize("method", ["ifs", "huang", "cosmo"])
 @pytest.mark.parametrize(
     "t,p,phase",
     [
@@ -635,3 +635,35 @@ def test_xr_specific_gas_constant(q):
     ref = thermo.array.specific_gas_constant(_np(q))
     assert np.allclose(out.values, ref, equal_nan=True)
     assert out.ndim == 0
+
+
+@pytest.mark.parametrize("method", ["ifs", "cosmo"])
+def test_xr_humidity_from_dewpoint_method(method):
+    t = np.array([263.15, 283.15, 303.15])
+    td = np.array([258.15, 278.15, 291.15])
+    q = np.array([0.001, 0.005, 0.012])
+    p = np.array([80000.0, 90000.0, 101325.0])
+
+    out = thermo.relative_humidity_from_dewpoint(_xr_da_1d(t), _xr_da_1d(td), method=method)
+    ref = thermo.array.relative_humidity_from_dewpoint(t, td, method=method)
+    assert np.allclose(out.values, ref)
+    assert out.attrs["method"] == method
+
+    out = thermo.specific_humidity_from_dewpoint(_xr_da_1d(td), _xr_da_1d(p), method=method)
+    ref = thermo.array.specific_humidity_from_dewpoint(td, p, method=method)
+    assert np.allclose(out.values, ref)
+    assert out.attrs["method"] == method
+
+    out = thermo.relative_humidity_from_specific_humidity(
+        _xr_da_1d(t), _xr_da_1d(q), _xr_da_1d(p), phase="water", method=method
+    )
+    ref = thermo.array.relative_humidity_from_specific_humidity(t, q, p, phase="water", method=method)
+    assert np.allclose(out.values, ref)
+    assert out.attrs["method"] == method
+    assert out.attrs["phase"] == "water"
+
+
+def test_xr_humidity_invalid_method():
+    t = _xr_da_1d([280.0])
+    with pytest.raises(ValueError):
+        thermo.relative_humidity_from_dewpoint(t, t - 5.0, method="unknown")

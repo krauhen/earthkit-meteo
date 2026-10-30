@@ -61,6 +61,10 @@ IFS Documentation CY47R3 - Part IV Physical processes, (2021). URL: https://www.
 
 IFS Documentation CY49R1 - Part III: Dynamics and numerical procedures, (2024). URL: https://www.ecmwf.int/en/elibrary/81625-ifs-documentation-cy49r1-part-iii-dynamics-and-numerical-procedures
 
+.. [Sonntag1990]
+
+Sonntag, D., (1990). Important new values of the physical constants of 1986, vapour pressure formulations based on the ITS-90, and psychrometer formulae. Z. Meteorol., 40, 340-344.
+
 .. [Stipanuk1973]
 
 Stipanuk, G. S., (1973). Algorithms for Generating a Skew-T, Log P Diagram and Computing Selected Meteorological Quantities. Atmospheric Sciences Laboratory, U.S. Army Electronics Command. White Sands Missile Range, New Mexico 88002.
