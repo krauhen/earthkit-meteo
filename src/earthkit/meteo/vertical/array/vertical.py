@@ -1775,6 +1775,89 @@ def interpolate_monotonic(
     )
 
 
+def _levels_first(xp, a, vertical_dim):
+    """Return ``a`` with its vertical axis moved to position 0."""
+    return a if vertical_dim == 0 else xp.moveaxis(a, vertical_dim, 0)
+
+
+def _target_levels(xp, target, nlev_shape, vertical_dim, name):
+    """Return ``target`` as ``[m, ...]`` plus a flag telling if it was a single level.
+
+    ``target`` may be a scalar, a 1D array of levels or an array with a vertical axis
+    at ``vertical_dim`` whose other axes match ``nlev_shape`` (the shape of one level).
+    The flag is True only for a scalar ``target``, see :func:`_restore`.
+    """
+    target = xp.asarray(target)
+    if target.ndim == 0:
+        return xp.broadcast_to(target, (1,) + tuple(nlev_shape)), True
+    if target.ndim == 1 and len(nlev_shape) > 0:
+        target = xp.reshape(target, (target.shape[0],) + (1,) * len(nlev_shape))
+        return xp.broadcast_to(target, (target.shape[0],) + tuple(nlev_shape)), False
+    target = _levels_first(xp, target, vertical_dim)
+    if tuple(target.shape[1:]) != tuple(nlev_shape):
+        raise ValueError(f"{name} shape {target.shape} does not match one level {tuple(nlev_shape)}")
+    return target, False
+
+
+def _restore(xp, out, single, vertical_dim):
+    """Undo :func:`_target_levels` on the result ``out`` shaped ``[m, ...]``."""
+    if single:
+        return out[0]
+    return out if vertical_dim == 0 else xp.moveaxis(out, 0, vertical_dim)
+
+
+def nearest_level_index(
+    coords: ArrayLike,
+    target_coords: ArrayLike,
+    max_diff: float | None = None,
+    vertical_dim: int = 0,
+) -> ArrayLike:
+    r"""Index of the level nearest to each target coordinate, per column.
+
+    For each target :math:`c_t` the index is :math:`\arg\min_k |c_k - c_t|` along the
+    vertical axis.
+
+    *New in version 1.4.0*
+
+    Parameters
+    ----------
+    coords : ArrayLike
+        Vertical coordinate of the levels (e.g. pressure or height). The vertical axis is
+        given by ``vertical_dim``. Levels where ``coords`` is nan are never selected.
+    target_coords : ArrayLike
+        Target coordinates, same type and units as ``coords``. A scalar, a 1D array of
+        targets, or an array with a vertical axis at ``vertical_dim`` whose other axes match
+        one level of ``coords``.
+    max_diff : float, optional
+        Largest accepted :math:`|c_k - c_t|`. When the nearest level is farther away
+        the result is -1. ``None`` (default) accepts any distance.
+    vertical_dim : int, default=0
+        Vertical axis of ``coords``, ``target_coords`` and of the result.
+
+    Returns
+    -------
+    ArrayLike
+        Integer level indices, shaped like ``target_coords`` (one level for a scalar).
+
+        - On a tie (two levels at the same distance) the lower index wins.
+        - The index is -1 where the nearest level is farther than ``max_diff``, where
+          the target is nan, or where the column has no valid level.
+    """
+    xp = array_namespace(coords, target_coords)
+    coords = _levels_first(xp, xp.asarray(coords), vertical_dim)
+    target, single = _target_levels(xp, target_coords, coords.shape[1:], vertical_dim, "target_coords")
+
+    dist = xp.abs(coords[xp.newaxis] - target[:, xp.newaxis])
+    dist = xp.where(xp.isnan(dist), xp.asarray(xp.inf, dtype=dist.dtype), dist)
+    idx = xp.argmin(dist, axis=1)
+    dmin = xp.min(dist, axis=1)
+    ok = dmin < xp.inf
+    if max_diff is not None:
+        ok = ok & (dmin <= max_diff)
+    idx = xp.where(ok, idx, xp.asarray(-1, dtype=idx.dtype))
+    return _restore(xp, idx, single, vertical_dim)
+
+
 _BELOW_SURFACE_H1 = 2000.0  # m
 _BELOW_SURFACE_H2 = 2500.0  # m
 _BELOW_SURFACE_T1 = 298.0  # K

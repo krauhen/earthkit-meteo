@@ -1068,3 +1068,64 @@ def test_specific_gas_constant(q, v_ref, xp, device):
     q, v_ref = xp.asarray(q, device=device), xp.asarray(v_ref, device=device)
     r = thermo.array.specific_gas_constant(q)
     assert xp.allclose(r, v_ref)
+
+
+@pytest.fixture(params=["array", "top"])
+def mod(request):
+    return thermo.array if request.param == "array" else thermo
+
+
+# levels: 300, 500, 700, 850, 1000 hPa, top first; two columns
+_KI_P = [
+    [30000.0, 30000.0],
+    [50000.0, 51000.0],
+    [70000.0, 72000.0],
+    [85000.0, 89000.0],
+    [100000.0, 100000.0],
+]
+_KI_T = [[230.0, 231.0], [255.0, 256.0], [275.0, 276.0], [285.0, 286.0], [295.0, 296.0]]
+_KI_TD = [[200.0, 201.0], [240.0, 241.0], [268.0, 266.0], [281.0, 280.0], [290.0, 291.0]]
+
+
+@pytest.mark.parametrize("xp, device", NAMESPACE_DEVICES)
+def test_k_index(mod, xp, device):
+    t, td, p = (xp.asarray(a, device=device) for a in (_KI_T, _KI_TD, _KI_P))
+
+    # column 1: 850 hPa is 4000 Pa away from the nearest level, so it is nan
+    r = mod.k_index(t, td, p)
+    assert r.shape == (2,)
+    assert abs(float(r[0]) - ((285.0 - 255.0) + 281.0 - (275.0 - 268.0))) < 1e-10
+    assert xp.isnan(r[1])
+
+    # wider tolerance keeps column 1; levels on the last axis
+    r = mod.k_index(t.T, td.T, p.T, vertical_dim=1, max_diff=5000.0)
+    expected = xp.asarray(
+        [(285.0 - 255.0) + 281.0 - (275.0 - 268.0), (286.0 - 256.0) + 280.0 - (276.0 - 266.0)],
+        device=device,
+    )
+    assert r.shape == (2,)
+    assert xp.all(xp.abs(r - expected) < 1e-10)
+
+
+@pytest.mark.parametrize("xp, device", NAMESPACE_DEVICES)
+def test_k_index_nan(mod, xp, device):
+    t, td, p = (xp.asarray(a, device=device) for a in (_KI_T, _KI_TD, _KI_P))
+
+    # nan temperature on a selected level (700 hPa, column 0) gives nan
+    t_nan = xp.asarray(_KI_T, device=device)
+    t_nan[2, 0] = float("nan")
+    assert xp.isnan(mod.k_index(t_nan, td, p, max_diff=5000.0)[0])
+
+    # a nan pressure level is never selected: the other column stays valid
+    p_nan = xp.asarray(_KI_P, device=device)
+    p_nan[3, 0] = float("nan")
+    r = mod.k_index(t, td, p_nan, max_diff=5000.0)
+    assert xp.isnan(r[0]) and not xp.isnan(r[1])
+
+
+@pytest.mark.parametrize("xp, device", NAMESPACE_DEVICES)
+def test_k_index_float32(mod, xp, device):
+    t, td, p = (xp.asarray(a, dtype=xp.float32, device=device) for a in (_KI_T, _KI_TD, _KI_P))
+    r = mod.k_index(t, td, p)
+    assert r.dtype == xp.float32
+    assert xp.isnan(r[1])

@@ -9,6 +9,7 @@
 
 from __future__ import annotations
 
+import numpy as np
 import xarray as xr
 
 from earthkit.meteo import constants
@@ -264,3 +265,42 @@ def extrapolate_geopotential_to_pressure_levels_below_surface(
         "standard_name": "geopotential",
         "units": "m2 s-2",
     })
+
+
+def nearest_level_index(
+    coords: xr.DataArray,
+    target_coords: xr.DataArray | float,
+    max_diff: float | None = None,
+    vertical_dim: str = "z",
+) -> xr.DataArray:
+    r"""Index of the level nearest to each target coordinate, per column.
+
+    Parameters
+    ----------
+    coords : xr.DataArray
+        Vertical coordinate of the levels (e.g. pressure or height). Levels where
+        ``coords`` is nan are never selected.
+    target_coords : xr.DataArray | float
+        Target coordinates, same units as ``coords``. Broadcast against ``coords``
+        following xarray rules; a DataArray with its own dimension (not ``vertical_dim``)
+        adds that dimension to the result.
+    max_diff : float, optional
+        Largest accepted distance between a level and its target. When the nearest
+        level is farther away the result is -1. ``None`` (default) accepts any distance.
+    vertical_dim : str, default="z"
+        Name of the vertical dimension of ``coords``.
+
+    Returns
+    -------
+    xr.DataArray
+        Integer level indices, without ``vertical_dim``.
+
+    See :func:`earthkit.meteo.vertical.array.nearest_level_index`
+    for the definition.
+    """
+    dist = abs(coords - target_coords).fillna(np.inf)
+    dmin = dist.min(dim=vertical_dim)
+    ok = dmin < np.inf
+    if max_diff is not None:
+        ok = ok & (dmin <= max_diff)
+    return dist.argmin(dim=vertical_dim).where(ok, -1)

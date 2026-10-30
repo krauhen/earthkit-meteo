@@ -37,6 +37,11 @@ Yessad, K., FULL-POS in the cycle 46T1R1 of ARPEGE/IFS. URL: https://www.umr-cnr
 Gaussian quadrature.  URL: https://en.wikipedia.org/wiki/Gaussian_quadrature
 
 
+.. [George1960]
+
+George, J. J., (1960). Weather Forecasting for Aeronautics. Academic Press, 673 pp.
+
+
 .. [Hersbach2000]
 
 Hersbach, H., (2000). Decomposition of the Continuous Ranked Probability Score for Ensemble Prediction Systems. Weather and Forecasting 15: 559-570.

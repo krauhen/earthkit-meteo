@@ -635,3 +635,39 @@ def test_xr_specific_gas_constant(q):
     ref = thermo.array.specific_gas_constant(_np(q))
     assert np.allclose(out.values, ref, equal_nan=True)
     assert out.ndim == 0
+
+
+def _ki_inputs():
+    import xarray as xr
+
+    dims = ("z", "x")
+    p = xr.DataArray(
+        [[30000.0, 30000.0], [50000.0, 51000.0], [70000.0, 72000.0], [85000.0, 89000.0], [100000.0, 100000.0]],
+        dims=dims,
+    )
+    t = xr.DataArray([[230.0, 231.0], [255.0, 256.0], [275.0, 276.0], [285.0, 286.0], [295.0, 296.0]], dims=dims)
+    td = xr.DataArray([[200.0, 201.0], [240.0, 241.0], [268.0, 266.0], [281.0, 280.0], [290.0, 291.0]], dims=dims)
+    return t, td, p
+
+
+def test_xr_k_index():
+    import xarray as xr
+
+    t, td, p = _ki_inputs()
+    out = thermo.k_index(t, td, p, max_diff=5000.0)
+    ref = thermo.array.k_index(_np(t), _np(td), _np(p), max_diff=5000.0)
+    assert isinstance(out, xr.DataArray)
+    assert out.dims == ("x",)
+    assert np.allclose(out.values, ref)
+
+    # default tolerance: column 1 has no level near 850 hPa
+    out = thermo.k_index(t, td, p)
+    assert np.isnan(out.values[1]) and not np.isnan(out.values[0])
+
+
+def test_xr_k_index_vertical_dim():
+    t, td, p = _ki_inputs()
+    ref = thermo.k_index(t, td, p, max_diff=5000.0)
+    out = thermo.k_index(t.transpose("x", "z"), td.transpose("x", "z"), p.transpose("x", "z"), max_diff=5000.0)
+    assert out.dims == ("x",)
+    assert np.allclose(out.values, ref.values)

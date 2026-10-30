@@ -1520,3 +1520,44 @@ def specific_gas_constant(q: xr.DataArray) -> xr.DataArray:
         "units": "J kg-1 K-1",
         "long_name": "Specific gas constant of moist air",
     })
+
+
+def k_index(
+    t: xr.DataArray,
+    td: xr.DataArray,
+    p: xr.DataArray,
+    vertical_dim: str = "z",
+    max_diff: float = 3000.0,
+) -> xr.DataArray:
+    r"""Compute the K index from temperature and dewpoint on levels.
+
+    Parameters
+    ----------
+    t : xarray.DataArray
+        Temperature on levels (K)
+    td : xarray.DataArray
+        Dewpoint temperature on levels (K)
+    p : xarray.DataArray
+        Pressure of the levels (Pa)
+    vertical_dim : str, optional
+        Name of the vertical dimension (default: ``"z"``)
+    max_diff : float, optional
+        Largest accepted distance (Pa) between a level and each of the 850, 700 and
+        500 hPa targets (default: 3000)
+
+    Returns
+    -------
+    xarray.DataArray
+        K index (K), without the vertical dimension
+
+    See :func:`earthkit.meteo.thermo.array.k_index` for the definition.
+    """
+    out = xr.apply_ufunc(
+        array.k_index,
+        t,
+        td,
+        p,
+        kwargs={"vertical_dim": -1, "max_diff": max_diff},
+        input_core_dims=[[vertical_dim]] * 3,
+    )
+    return out.assign_attrs({"units": "K", "long_name": "K index"})

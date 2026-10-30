@@ -60,3 +60,23 @@ def test_high_level_extrapolate_to_pressure_levels_below_surface_dispatch(input_
     if input_type == "fieldlist":
         assert res.get("vertical.level_type") == ["pressure"]
         assert res.get("vertical.level") == [1050.0]
+
+
+@pytest.mark.parametrize("input_type", ["numpy", "xarray"])
+def test_high_level_nearest_level_index_dispatch(input_type):
+    import numpy as np
+
+    p = np.array([[50000.0, 61000.0], [70000.0, 84000.0], [85000.0, 92500.0]])
+
+    if input_type == "numpy":
+        expected_type = np.ndarray
+        coords = p
+    else:
+        xr = pytest.importorskip("xarray")
+        expected_type = xr.DataArray
+        coords = xr.DataArray(p, dims=("z", "cell"))
+
+    res = vertical_high_level.nearest_level_index(coords, 85000.0)
+
+    assert isinstance(res, expected_type)
+    np.testing.assert_array_equal(np.asarray(res), [2, 1])

@@ -15,6 +15,7 @@ from earthkit.utils.array import array_namespace
 
 from earthkit.meteo import constants
 from earthkit.meteo.utils.convert import celsius_to_kelvin
+from earthkit.meteo.vertical.array.vertical import _levels_first, nearest_level_index
 
 # import numpy as np
 
@@ -1795,3 +1796,66 @@ def specific_gas_constant(q: ArrayLike) -> ArrayLike:
     """
     R = constants.Rd + (constants.Rv - constants.Rd) * q
     return R
+
+
+_K_INDEX_P500 = 50000.0  # Pa
+_K_INDEX_P700 = 70000.0  # Pa
+_K_INDEX_P850 = 85000.0  # Pa
+
+
+def k_index(
+    t: ArrayLike,
+    td: ArrayLike,
+    p: ArrayLike,
+    vertical_dim: int = 0,
+    max_diff: float = 3000.0,
+) -> ArrayLike:
+    r"""Compute the K index from temperature and dewpoint on levels.
+
+    *New in version 1.4.0*
+
+    Parameters
+    ----------
+    t: array-like
+        Temperature on levels (K)
+    td: array-like
+        Dewpoint temperature on levels (K)
+    p: array-like
+        Pressure of the levels (Pa)
+    vertical_dim: int, optional
+        Vertical axis of ``t``, ``td`` and ``p`` (default: 0)
+    max_diff: float, optional
+        Largest accepted distance (Pa) between a level and each of the 850, 700 and
+        500 hPa targets (default: 3000)
+
+    Returns
+    -------
+    array-like
+        K index (K), without the vertical axis, with the same floating point type as ``t``.
+
+
+    The computation is based on the following formula [George1960]_:
+
+    .. math::
+
+        K = (T_{850} - T_{500}) + T_{d,850} - (T_{700} - T_{d,700})
+
+    where each subscript is the level nearest to that pressure (hPa), selected with
+    :func:`earthkit.meteo.vertical.array.nearest_level_index`. The result is nan for a
+    column where any of the three targets has no level within ``max_diff``, and where
+    ``t`` or ``td`` is nan on a selected level.
+    """
+    xp = array_namespace(t, td, p)
+    t = _levels_first(xp, xp.asarray(t), vertical_dim)
+    td = _levels_first(xp, xp.asarray(td), vertical_dim)
+    p = _levels_first(xp, xp.asarray(p), vertical_dim)
+
+    idx = nearest_level_index(p, [_K_INDEX_P500, _K_INDEX_P700, _K_INDEX_P850], max_diff=max_diff)
+    found = xp.all(idx >= 0, axis=0)
+    idx = xp.where(idx >= 0, idx, xp.zeros_like(idx))
+
+    def at(a, i):
+        return xp.take_along_axis(a, idx[i : i + 1, ...], axis=0)[0]
+
+    k = (at(t, 2) - at(t, 0)) + at(td, 2) - (at(t, 1) - at(td, 1))
+    return xp.where(found, k, xp.asarray(xp.nan, dtype=k.dtype))

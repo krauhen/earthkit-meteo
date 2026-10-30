@@ -600,3 +600,32 @@ def test_height_on_hybrid_levels(vertical, index, xp, device, h_type, h_referenc
     tolerance = Tolerance({64: (1e-8, 1e-6), 32: (10, 1e-6)})
     atol, rtol = tolerance.get(dtype=t.dtype)
     assert xp.allclose(h, h_ref, atol=atol, rtol=rtol), f"max abs diff={xp.max(xp.abs(h - h_ref))}"
+
+
+@pytest.mark.parametrize("xp, device", NAMESPACE_DEVICES)
+@pytest.mark.parametrize(
+    "target,max_diff,expected",
+    [
+        (85000.0, None, [2, 1]),  # exact hit, closest of two
+        (77500.0, None, [1, 1]),  # tie between levels 1 and 2 in column 0 goes to 1
+        (60000.0, 3000.0, [-1, 0]),  # max_diff exceeded in column 0
+        (np.nan, None, [-1, -1]),
+    ],
+)
+def test_nearest_level_index(vertical, target, max_diff, expected, xp, device):
+    p = xp.asarray([[50000.0, 61000.0], [70000.0, 84000.0], [85000.0, 92500.0]], device=device)
+
+    r = vertical.nearest_level_index(p, target, max_diff=max_diff)
+    assert r.shape == (2,)
+    assert xp.all(r == xp.asarray(expected, device=device))
+
+
+@pytest.mark.parametrize("xp, device", NAMESPACE_DEVICES)
+def test_nearest_level_index_targets(vertical, xp, device):
+    # several targets, levels on the last axis, a nan level is skipped
+    p = xp.asarray([[50000.0, 70000.0, 85000.0], [50000.0, np.nan, 85000.0]], device=device)
+    target = xp.asarray([50000.0, 70000.0, 85000.0], device=device)
+
+    r = vertical.nearest_level_index(p, target, vertical_dim=1)
+    assert r.shape == (2, 3)
+    assert xp.all(r == xp.asarray([[0, 1, 2], [0, 2, 2]], device=device))

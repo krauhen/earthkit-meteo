@@ -3159,3 +3159,73 @@ def specific_gas_constant(
     """
     dispatched = dispatch(specific_gas_constant, array=True)
     return dispatched(q)
+
+
+@overload
+def k_index(
+    t: "ArrayLike",
+    td: "ArrayLike",
+    p: "ArrayLike",
+    vertical_dim: int = 0,
+    max_diff: float = 3000.0,
+) -> "ArrayLike": ...
+
+
+@overload
+def k_index(
+    t: "xarray.DataArray",
+    td: "xarray.DataArray",
+    p: "xarray.DataArray",
+    vertical_dim: str = "z",
+    max_diff: float = 3000.0,
+) -> "xarray.DataArray": ...
+
+
+def k_index(
+    t: "ArrayLike | xarray.DataArray",
+    td: "ArrayLike | xarray.DataArray",
+    p: "ArrayLike | xarray.DataArray",
+    vertical_dim: "int | str | None" = None,
+    max_diff: float = 3000.0,
+) -> "ArrayLike | xarray.DataArray":
+    r"""Compute the K index from temperature and dewpoint on levels.
+
+    *New in version 1.4.0*
+
+    Parameters
+    ----------
+    t: array-like | xarray.DataArray
+        Temperature on levels (K)
+    td: array-like | xarray.DataArray
+        Dewpoint temperature on levels (K)
+    p: array-like | xarray.DataArray
+        Pressure of the levels (Pa)
+    vertical_dim: int | str, optional
+        Vertical axis: an int for array-like input (default 0), the name of the
+        vertical dimension for xarray input (default ``"z"``).
+    max_diff: float, optional
+        Largest accepted distance (Pa) between a level and each of the 850, 700 and
+        500 hPa targets (default: 3000)
+
+    Returns
+    -------
+    array-like | xarray.DataArray
+        K index (K), without the vertical axis
+
+    See Also
+    --------
+    earthkit.meteo.thermo.array.k_index
+
+
+    Implementations
+    ---------------
+    :func:`k_index` calls one of the following implementations depending on
+    the type of the input arguments:
+
+    - :py:meth:`earthkit.meteo.thermo.array.k_index` for array-like
+    - :py:meth:`earthkit.meteo.thermo.xarray.k_index` for xarray.DataArray
+
+    The function returns an object of the same type as the ``t`` argument.
+    """
+    kwargs = {} if vertical_dim is None else {"vertical_dim": vertical_dim}
+    return dispatch(k_index, xarray=True, fieldlist=False, array=True)(t, td, p, max_diff=max_diff, **kwargs)
