@@ -1068,3 +1068,547 @@ def test_specific_gas_constant(q, v_ref, xp, device):
     q, v_ref = xp.asarray(q, device=device), xp.asarray(v_ref, device=device)
     r = thermo.array.specific_gas_constant(q)
     assert xp.allclose(r, v_ref)
+
+
+_RI_Z = [3000.0, 2000.0, 1000.0, 500.0, 100.0]
+
+
+# "top" is the upstream module: thermo itself shadows pbl_height_bulk_richardson
+@pytest.fixture(params=["array", "top"])
+def mod(request):
+    return thermo.array if request.param == "array" else thermo.thermo
+
+
+@pytest.mark.parametrize("xp, device", NAMESPACE_DEVICES)
+def test_bulk_richardson_number_neutral(mod, xp, device):
+    # constant theta_v: zero everywhere even with strong shear
+    theta_v = xp.full((5, 2), 300.0, device=device)
+    z = xp.asarray([[h, h] for h in _RI_Z], device=device)
+    u = xp.asarray([[20.0, 5.0], [15.0, 4.0], [10.0, 3.0], [5.0, 2.0], [1.0, 1.0]], device=device)
+    v = xp.zeros_like(u)
+
+    r = mod.bulk_richardson_number(theta_v, z, u, v)
+    assert r.shape == (5, 2)
+    assert xp.all(r == 0.0)
+
+
+@pytest.mark.parametrize("xp, device", NAMESPACE_DEVICES)
+def test_bulk_richardson_number_stable(mod, xp, device):
+    theta_v = xp.asarray([310.0, 306.0, 303.0, 301.0, 300.0], device=device)
+    z = xp.asarray(_RI_Z, device=device)
+    u = xp.asarray([10.0, 8.0, 6.0, 4.0, 2.0], device=device)
+    v = xp.asarray([0.0, 6.0, 0.0, 3.0, 0.0], device=device)
+
+    r = mod.bulk_richardson_number(theta_v, z, u, v, z_sfc=50.0)
+    mean = (306.0 + 303.0 + 301.0 + 300.0) / 4.0
+    expected = constants.g * (2000.0 - 50.0) * 6.0 / (mean * 100.0)
+    assert xp.all(r[:-1] > 0.0)
+    assert r[-1] == 0.0
+    assert abs(float(r[1]) - expected) < 1e-12
+
+
+@pytest.mark.parametrize("xp, device", NAMESPACE_DEVICES)
+def test_bulk_richardson_number_vmin(mod, xp, device):
+    # calm wind on level 0: the speed is floored at vmin; levels on the last axis
+    theta_v = xp.asarray([[301.0, 300.0]], device=device)
+    z = xp.asarray([[1000.0, 0.0]], device=device)
+    u = xp.zeros_like(theta_v)
+
+    r = mod.bulk_richardson_number(theta_v, z, u, u, vertical_dim=1, vmin=0.5)
+    expected = constants.g * 1000.0 * 1.0 / (300.5 * 0.25)
+    assert r.shape == (1, 2)
+    assert abs(float(r[0, 0]) - expected) < 1e-9
+
+
+@pytest.mark.parametrize("xp, device", NAMESPACE_DEVICES)
+def test_bulk_richardson_number_single_level(mod, xp, device):
+    r = mod.bulk_richardson_number(
+        xp.asarray([300.0], device=device),
+        xp.asarray([100.0], device=device),
+        xp.asarray([3.0], device=device),
+        xp.asarray([4.0], device=device),
+    )
+    assert r.shape == (1,)
+    assert float(r[0]) == 0.0
+
+
+@pytest.mark.parametrize("xp, device", NAMESPACE_DEVICES)
+def test_bulk_richardson_number_vertical_dim(mod, xp, device):
+    theta_v = xp.asarray([[310.0, 312.0], [305.0, 306.0], [300.0, 301.0]], device=device)
+    z = xp.asarray([[2000.0, 2100.0], [1000.0, 1100.0], [100.0, 150.0]], device=device)
+    u = xp.asarray([[5.0, 6.0], [3.0, 4.0], [1.0, 2.0]], device=device)
+    v = xp.zeros_like(u)
+
+    r0 = mod.bulk_richardson_number(theta_v, z, u, v)
+    r1 = mod.bulk_richardson_number(theta_v.T, z.T, u.T, v.T, vertical_dim=1)
+    assert r1.shape == (2, 3)
+    assert xp.allclose(r1.T, r0)
+
+
+@pytest.mark.parametrize("xp, device", NAMESPACE_DEVICES)
+def test_bulk_richardson_number_z_sfc_array(mod, xp, device):
+    theta_v = xp.asarray([[310.0, 310.0], [300.0, 300.0]], device=device)
+    z = xp.asarray([[1000.0, 1000.0], [100.0, 100.0]], device=device)
+    u = xp.asarray([[5.0, 5.0], [1.0, 1.0]], device=device)
+    v = xp.zeros_like(u)
+
+    r = mod.bulk_richardson_number(theta_v, z, u, v, z_sfc=xp.asarray([0.0, 500.0], device=device))
+    assert abs(float(r[0, 1]) / float(r[0, 0]) - 0.5) < 1e-12
+
+
+@pytest.mark.parametrize("xp, device", NAMESPACE_DEVICES)
+def test_bulk_richardson_number_nan(mod, xp, device):
+    nan = float("nan")
+    z = xp.asarray([2000.0, 1000.0, 100.0], device=device)
+    u = xp.asarray([5.0, 3.0, 1.0], device=device)
+    v = xp.zeros_like(u)
+
+    # nan in the middle: it is in the mean of the levels above and on its own level
+    r = mod.bulk_richardson_number(xp.asarray([310.0, nan, 300.0], device=device), z, u, v)
+    assert xp.isnan(r[0]) and xp.isnan(r[1]) and r[2] == 0.0
+
+    # nan on the lowest level: all levels are nan
+    r = mod.bulk_richardson_number(xp.asarray([310.0, 305.0, nan], device=device), z, u, v)
+    assert xp.all(xp.isnan(r))
+
+    # nan wind: only its own level
+    r = mod.bulk_richardson_number(
+        xp.asarray([310.0, 305.0, 300.0], device=device),
+        z,
+        xp.asarray([nan, 3.0, 1.0], device=device),
+        v,
+    )
+    assert xp.isnan(r[0]) and not xp.isnan(r[1]) and r[2] == 0.0
+
+
+@pytest.mark.parametrize("xp, device", NAMESPACE_DEVICES)
+def test_bulk_richardson_number_float32(mod, xp, device):
+    theta_v = xp.asarray([310.0, 305.0, 300.0], dtype=xp.float32, device=device)
+    z = xp.asarray([2000.0, 1000.0, 100.0], dtype=xp.float32, device=device)
+    u = xp.asarray([5.0, 3.0, 1.0], dtype=xp.float32, device=device)
+
+    r = mod.bulk_richardson_number(theta_v, z, u, xp.zeros_like(u))
+    assert r.dtype == xp.float32
+
+
+def _pbl_column(xp, device, dtype=None):
+    # stable column, ordered from the top down
+    theta_v = xp.asarray([310.0, 303.0, 300.5, 300.0], dtype=dtype, device=device)
+    z = xp.asarray([3000.0, 2000.0, 1000.0, 100.0], dtype=dtype, device=device)
+    u = xp.asarray([10.0, 10.0, 10.0, 10.0], dtype=dtype, device=device)
+    return theta_v, z, u, xp.zeros_like(u)
+
+
+@pytest.mark.parametrize("xp, device", NAMESPACE_DEVICES)
+def test_pbl_height_bulk_richardson_interpolation(mod, xp, device):
+    theta_v, z, u, v = _pbl_column(xp, device)
+    z_sfc = 50.0
+    ri = mod.bulk_richardson_number(theta_v, z, u, v, z_sfc=z_sfc)
+    assert float(ri[2]) < 0.22 < float(ri[1])
+
+    h = mod.pbl_height_bulk_richardson(theta_v, z, u, v, z_sfc=z_sfc)
+    h_k, h_b = 2000.0 - z_sfc, 1000.0 - z_sfc
+    expected = h_b + (0.22 - float(ri[2])) / (float(ri[1]) - float(ri[2])) * (h_k - h_b)
+    assert h.shape == ()
+    assert h_b < float(h) < h_k
+    assert abs(float(h) - expected) < 1e-9
+
+    # the critical value is reproduced exactly at a level
+    h = mod.pbl_height_bulk_richardson(theta_v, z, u, v, z_sfc=z_sfc, ri_crit=float(ri[1]) - 1e-12)
+    assert abs(float(h) - h_k) < 1e-6
+
+
+@pytest.mark.parametrize("xp, device", NAMESPACE_DEVICES)
+def test_pbl_height_bulk_richardson_no_crossing(mod, xp, device):
+    theta_v = xp.asarray([[300.0, 310.0], [300.0, 305.0], [300.0, 300.0]], device=device)
+    z = xp.asarray([[2000.0, 2000.0], [1000.0, 1000.0], [100.0, 100.0]], device=device)
+    u = xp.full(theta_v.shape, 5.0, device=device)
+
+    h = mod.pbl_height_bulk_richardson(theta_v, z, u, xp.zeros_like(u))
+    assert h.shape == (2,)
+    assert xp.isnan(h[0])  # neutral column
+    assert not xp.isnan(h[1])  # stable column in the same call
+    assert 0.0 < float(h[1]) < 1900.0
+
+    # single level: no crossing
+    h = mod.pbl_height_bulk_richardson(
+        xp.asarray([300.0], device=device),
+        xp.asarray([100.0], device=device),
+        xp.asarray([3.0], device=device),
+        xp.asarray([4.0], device=device),
+    )
+    assert xp.isnan(h)
+
+
+@pytest.mark.parametrize("xp, device", NAMESPACE_DEVICES)
+def test_pbl_height_bulk_richardson_vertical_dim_z_sfc(mod, xp, device):
+    theta_v, z, u, v = _pbl_column(xp, device)
+    theta_v, z, u, v = (xp.stack([a, a], axis=0) for a in (theta_v, z, u, v))  # [2, 4]
+    z_sfc = xp.asarray([50.0, 150.0], device=device)
+
+    h = mod.pbl_height_bulk_richardson(theta_v, z, u, v, z_sfc=z_sfc, vertical_dim=1)
+    assert h.shape == (2,)
+    ref0 = mod.pbl_height_bulk_richardson(theta_v[0], z[0], u[0], v[0], z_sfc=50.0)
+    ref1 = mod.pbl_height_bulk_richardson(theta_v[1], z[1], u[1], v[1], z_sfc=150.0)
+    assert abs(float(h[0]) - float(ref0)) < 1e-9
+    assert abs(float(h[1]) - float(ref1)) < 1e-9
+
+
+@pytest.mark.parametrize("xp, device", NAMESPACE_DEVICES)
+def test_pbl_height_bulk_richardson_nan(mod, xp, device):
+    nan = float("nan")
+    theta_v, z, u, v = _pbl_column(xp, device)
+
+    # nan potential temperature on the lowest level: nan everywhere
+    t = xp.asarray([310.0, 306.0, 301.0, nan], device=device)
+    assert xp.isnan(mod.pbl_height_bulk_richardson(t, z, u, v))
+
+    # nan wind on the level below the crossing level
+    u_nan = xp.asarray([10.0, 10.0, nan, 10.0], device=device)
+    assert xp.isnan(mod.pbl_height_bulk_richardson(theta_v, z, u_nan, v))
+
+    # nan wind above the crossing level does not matter
+    u_top = xp.asarray([nan, 10.0, 10.0, 10.0], device=device)
+    h = mod.pbl_height_bulk_richardson(theta_v, z, u_top, v)
+    assert not xp.isnan(h)
+
+
+@pytest.mark.parametrize("xp, device", NAMESPACE_DEVICES)
+def test_pbl_height_bulk_richardson_float32(mod, xp, device):
+    theta_v, z, u, v = _pbl_column(xp, device, dtype=xp.float32)
+    h = mod.pbl_height_bulk_richardson(theta_v, z, u, v, z_sfc=50.0)
+    assert h.dtype == xp.float32
+    h64 = mod.pbl_height_bulk_richardson(*(xp.astype(a, xp.float64) for a in (theta_v, z, u, v)), z_sfc=50.0)
+    assert abs(float(h) - float(h64)) < 1e-2
+
+
+@pytest.mark.parametrize("ri_crit", [0.0, -1.0, float("nan")])
+def test_pbl_height_bulk_richardson_ri_crit(mod, ri_crit):
+    a = np.asarray([310.0, 300.0])
+    with pytest.raises(ValueError):
+        mod.pbl_height_bulk_richardson(a, a, a, a, ri_crit=ri_crit)
+
+
+# levels: 300, 500, 700, 850, 1000 hPa, top first; two columns
+_KI_P = [
+    [30000.0, 30000.0],
+    [50000.0, 51000.0],
+    [70000.0, 72000.0],
+    [85000.0, 89000.0],
+    [100000.0, 100000.0],
+]
+_KI_T = [[230.0, 231.0], [255.0, 256.0], [275.0, 276.0], [285.0, 286.0], [295.0, 296.0]]
+_KI_TD = [[200.0, 201.0], [240.0, 241.0], [268.0, 266.0], [281.0, 280.0], [290.0, 291.0]]
+
+
+@pytest.mark.parametrize("xp, device", NAMESPACE_DEVICES)
+def test_k_index(mod, xp, device):
+    t, td, p = (xp.asarray(a, device=device) for a in (_KI_T, _KI_TD, _KI_P))
+
+    # column 1: 850 hPa is 4000 Pa away from the nearest level, so it is nan
+    r = mod.k_index(t, td, p)
+    assert r.shape == (2,)
+    assert abs(float(r[0]) - ((285.0 - 255.0) + 281.0 - (275.0 - 268.0))) < 1e-10
+    assert xp.isnan(r[1])
+
+    # wider tolerance keeps column 1; levels on the last axis
+    r = mod.k_index(t.T, td.T, p.T, vertical_dim=1, max_diff=5000.0)
+    expected = xp.asarray(
+        [(285.0 - 255.0) + 281.0 - (275.0 - 268.0), (286.0 - 256.0) + 280.0 - (276.0 - 266.0)],
+        device=device,
+    )
+    assert r.shape == (2,)
+    assert xp.all(xp.abs(r - expected) < 1e-10)
+
+
+@pytest.mark.parametrize("xp, device", NAMESPACE_DEVICES)
+def test_k_index_nan(mod, xp, device):
+    t, td, p = (xp.asarray(a, device=device) for a in (_KI_T, _KI_TD, _KI_P))
+
+    # nan temperature on a selected level (700 hPa, column 0) gives nan
+    t_nan = xp.asarray(_KI_T, device=device)
+    t_nan[2, 0] = float("nan")
+    assert xp.isnan(mod.k_index(t_nan, td, p, max_diff=5000.0)[0])
+
+    # a nan pressure level is never selected: the other column stays valid
+    p_nan = xp.asarray(_KI_P, device=device)
+    p_nan[3, 0] = float("nan")
+    r = mod.k_index(t, td, p_nan, max_diff=5000.0)
+    assert xp.isnan(r[0]) and not xp.isnan(r[1])
+
+
+@pytest.mark.parametrize("xp, device", NAMESPACE_DEVICES)
+def test_k_index_float32(mod, xp, device):
+    t, td, p = (xp.asarray(a, dtype=xp.float32, device=device) for a in (_KI_T, _KI_TD, _KI_P))
+    r = mod.k_index(t, td, p)
+    assert r.dtype == xp.float32
+    assert xp.isnan(r[1])
+
+
+@pytest.mark.parametrize("xp, device", NAMESPACE_DEVICES)
+@pytest.mark.parametrize("phase", ["water", "ice"])
+def test_saturation_vapour_pressure_cosmo_1(xp, device, phase):
+    ref_file = "sat_vp_cosmo.csv"
+
+    # Generated from the Magnus formula with the Sonntag (1990) coefficients:
+    # t = np.arange(-40.0, 40.1, 5.0) + 273.15
+    # tc = t - 273.15
+    # o = {"t": t}
+    # o["water"] = 611.2 * np.exp(17.62 * tc / (243.12 + tc))
+    # o["ice"] = 611.2 * np.exp(22.46 * tc / (272.62 + tc))
+    # save_test_reference(ref_file, o)
+
+    d = read_data_file(ref_file)
+
+    t = xp.asarray(d["t"], device=device)
+    v_ref = xp.asarray(d[phase], device=device)
+
+    svp = thermo.array.saturation_vapour_pressure(t, phase=phase, method="cosmo")
+    assert xp.allclose(svp, v_ref)
+
+
+@pytest.mark.parametrize("xp, device", NAMESPACE_DEVICES)
+@pytest.mark.parametrize("phase", ["water", "ice"])
+def test_saturation_vapour_pressure_cosmo_2(xp, device, phase):
+    # at 0 °C the Magnus formula reduces to its first coefficient for both phases
+    t = xp.asarray([273.15], device=device)
+    v_ref = xp.asarray([611.2], device=device)
+
+    svp = thermo.array.saturation_vapour_pressure(t, phase=phase, method="cosmo")
+    assert xp.allclose(svp, v_ref, rtol=1e-12)
+
+
+@pytest.mark.parametrize("xp, device", NAMESPACE_DEVICES)
+@pytest.mark.parametrize("phase", ["mixed", "water", "ice"])
+def test_saturation_vapour_pressure_slope_cosmo(xp, device, phase):
+    # temperatures away from the ends of the "mixed" interpolation range
+    t = xp.asarray([233.15, 245.15, 260.15, 270.15, 283.15, 303.15], device=device)
+    h = 1e-3
+
+    slope = thermo.array.saturation_vapour_pressure_slope(t, phase=phase, method="cosmo")
+    es_p = thermo.array.saturation_vapour_pressure(t + h, phase=phase, method="cosmo")
+    es_m = thermo.array.saturation_vapour_pressure(t - h, phase=phase, method="cosmo")
+    v_ref = (es_p - es_m) / (2 * h)
+    assert xp.allclose(slope, v_ref, rtol=1e-6, atol=0)
+
+
+def _magnus_water(t):
+    tc = t - 273.15
+    return 611.2 * np.exp(17.62 * tc / (243.12 + tc))
+
+
+@pytest.mark.parametrize("xp, device", NAMESPACE_DEVICES)
+def test_humidity_from_dewpoint_ifs_default(xp, device):
+    # method="ifs" is the default and still reproduces the reference data
+    d = ThermoInputData(xp, device)
+
+    r = thermo.array.relative_humidity_from_dewpoint(d.t, d.td, method="ifs")
+    assert xp.allclose(r, d.r, equal_nan=True)
+    assert xp.allclose(r, thermo.array.relative_humidity_from_dewpoint(d.t, d.td), equal_nan=True)
+
+    r = thermo.array.relative_humidity_from_specific_humidity(d.t, d.q, d.p, phase="mixed", method="ifs")
+    assert xp.allclose(r, d.r, equal_nan=True)
+
+    q = thermo.array.specific_humidity_from_dewpoint(d.td, d.p, method="ifs")
+    assert xp.allclose(q, thermo.array.specific_humidity_from_dewpoint(d.td, d.p), equal_nan=True)
+
+
+@pytest.mark.parametrize("xp, device", NAMESPACE_DEVICES)
+def test_humidity_from_dewpoint_cosmo(xp, device):
+    t_np = np.array([-20.0, -5.0, 0.0, 12.0, 30.0]) + 273.15
+    td_np = np.array([-25.0, -8.0, -3.0, 7.0, 18.0]) + 273.15
+    p_np = np.array([70000.0, 85000.0, 90000.0, 95000.0, 101325.0])
+
+    t = xp.asarray(t_np, device=device)
+    td = xp.asarray(td_np, device=device)
+    p = xp.asarray(p_np, device=device)
+
+    v_ref = xp.asarray(100.0 * _magnus_water(td_np) / _magnus_water(t_np), device=device)
+    r = thermo.array.relative_humidity_from_dewpoint(t, td, method="cosmo")
+    assert xp.allclose(r, v_ref, rtol=1e-12)
+
+    e = _magnus_water(td_np)
+    eps = constants.epsilon
+    v_ref = xp.asarray(eps * e / (p_np + (eps - 1) * e), device=device)
+    q = thermo.array.specific_humidity_from_dewpoint(td, p, method="cosmo")
+    assert xp.allclose(q, v_ref, rtol=1e-12)
+
+
+@pytest.mark.parametrize("xp, device", NAMESPACE_DEVICES)
+def test_relative_humidity_from_specific_humidity_phase(xp, device):
+    t = xp.asarray(np.array([-20.0, -5.0, 0.5, 10.0, 25.0]) + 273.15, device=device)
+    q = xp.asarray([0.0005, 0.002, 0.003, 0.006, 0.012], device=device)
+    p = xp.asarray([70000.0, 85000.0, 90000.0, 95000.0, 101325.0], device=device)
+
+    r_water = thermo.array.relative_humidity_from_specific_humidity(t, q, p, phase="water", method="cosmo")
+    r_mixed = thermo.array.relative_humidity_from_specific_humidity(t, q, p, phase="mixed", method="cosmo")
+
+    # identical above 0 °C, larger "mixed" values below (ice saturation is lower)
+    assert xp.allclose(r_water[2:], r_mixed[2:], rtol=1e-12)
+    assert xp.all(r_mixed[:2] > r_water[:2])
+
+    # phase="water" matches the vapour pressure over the Magnus water curve
+    e = thermo.array.vapour_pressure_from_specific_humidity(q, p)
+    v_ref = 100.0 * e / thermo.array.saturation_vapour_pressure(t, phase="water", method="cosmo")
+    assert xp.allclose(r_water, v_ref, rtol=1e-12)
+
+
+@pytest.mark.parametrize("xp, device", NAMESPACE_DEVICES)
+def test_humidity_invalid_method(xp, device):
+    t = xp.asarray([280.0], device=device)
+    td = xp.asarray([275.0], device=device)
+    q = xp.asarray([0.005], device=device)
+    p = xp.asarray([90000.0], device=device)
+
+    with pytest.raises(ValueError):
+        thermo.array.relative_humidity_from_dewpoint(t, td, method="unknown")
+
+    with pytest.raises(ValueError):
+        thermo.array.relative_humidity_from_specific_humidity(t, q, p, method="unknown")
+
+    with pytest.raises(ValueError):
+        thermo.array.specific_humidity_from_dewpoint(td, p, method="unknown")
+
+
+@pytest.mark.parametrize("xp, device", NAMESPACE_DEVICES)
+@pytest.mark.parametrize("dtype", ["float32", "float64"])
+def test_humidity_default_method_unchanged(xp, device, dtype):
+    # without method/phase the results must equal the formulas used before these options existed
+    dt = getattr(xp, dtype)
+    t = xp.asarray([233.15, 258.15, 273.15, 283.15, 303.15], dtype=dt, device=device)
+    td = xp.asarray([230.15, 255.15, 270.15, 280.15, 295.15], dtype=dt, device=device)
+    q = xp.asarray([0.0002, 0.001, 0.003, 0.006, 0.015], dtype=dt, device=device)
+    p = xp.asarray([85000.0, 90000.0, 95000.0, 100000.0, 101000.0], dtype=dt, device=device)
+
+    svp = thermo.array.saturation_vapour_pressure
+    expected_rd = 100.0 * svp(td, phase="water") / svp(t, phase="water")
+    expected_rq = 100.0 * thermo.array.vapour_pressure_from_specific_humidity(q, p) / svp(t)
+    expected_qd = thermo.array.specific_humidity_from_vapour_pressure(svp(td, phase="water"), p)
+
+    for r, e in (
+        (thermo.array.relative_humidity_from_dewpoint(t, td), expected_rd),
+        (thermo.array.relative_humidity_from_specific_humidity(t, q, p), expected_rq),
+        (thermo.array.specific_humidity_from_dewpoint(td, p), expected_qd),
+    ):
+        np.testing.assert_array_equal(np.asarray(r), np.asarray(e))
+        assert r.dtype == e.dtype
+
+
+@pytest.mark.parametrize("xp, device", NAMESPACE_DEVICES)
+def test_ept_cosmo_specific_humidity(xp, device):
+    # theta_e = theta * exp(Lv * w / (c_pd * t)), with w = q / (1 - q)
+    t = xp.asarray([253.15, 273.15, 293.15, 303.15], device=device)
+    q = xp.asarray([0.0005, 0.004, 0.01, 0.02], device=device)
+    p = xp.asarray([70000.0, 85000.0, 85000.0, 100000.0], device=device)
+
+    w = q / (1.0 - q)
+    theta = t * (1e5 / p) ** constants.kappa
+    v_ref = theta * xp.exp(constants.Lv * w / (constants.c_pd * t))
+
+    pt = thermo.array.ept_from_specific_humidity(t, q, p, method="cosmo")
+    assert xp.allclose(pt, v_ref, rtol=1e-12, atol=0)
+
+
+@pytest.mark.parametrize("xp, device", NAMESPACE_DEVICES)
+def test_ept_cosmo_dewpoint(xp, device):
+    # w = epsilon * e / (p - e), with e the saturation vapour pressure over water at td
+    t = xp.asarray([253.15, 273.15, 293.15, 303.15], device=device)
+    td = xp.asarray([250.15, 270.15, 285.15, 295.15], device=device)
+    p = xp.asarray([70000.0, 85000.0, 85000.0, 100000.0], device=device)
+
+    e = thermo.array.saturation_vapour_pressure(td, phase="water")
+    w = constants.epsilon * e / (p - e)
+    theta = t * (1e5 / p) ** constants.kappa
+    v_ref = theta * xp.exp(constants.Lv * w / (constants.c_pd * t))
+
+    pt = thermo.array.ept_from_dewpoint(t, td, p, method="cosmo")
+    assert xp.allclose(pt, v_ref, rtol=1e-12, atol=0)
+
+
+@pytest.mark.parametrize("xp, device", NAMESPACE_DEVICES)
+def test_ept_cosmo_float32(xp, device):
+    t = xp.asarray([293.15], dtype=xp.float32, device=device)
+    q = xp.asarray([0.01], dtype=xp.float32, device=device)
+    p = xp.asarray([85000.0], dtype=xp.float32, device=device)
+    assert thermo.array.ept_from_specific_humidity(t, q, p, method="cosmo").dtype == xp.float32
+
+
+@pytest.mark.parametrize("xp, device", NAMESPACE_DEVICES)
+def test_cosmo_ept_not_supported(xp, device):
+    t = xp.asarray([293.15], device=device)
+    q = xp.asarray([0.01], device=device)
+    p = xp.asarray([85000.0], device=device)
+    with pytest.raises(NotImplementedError):
+        thermo.array.saturation_ept(t, p, method="cosmo")
+    with pytest.raises(NotImplementedError):
+        thermo.array.wet_bulb_temperature_from_specific_humidity(t, q, p, ept_method="cosmo")
+    with pytest.raises(NotImplementedError):
+        thermo.array.wet_bulb_potential_temperature_from_specific_humidity(t, q, p, ept_method="cosmo")
+    with pytest.raises(NotImplementedError):
+        thermo.array.temperature_on_moist_adiabat(t, p, ept_method="cosmo")
+
+
+def _wet_bulb_cosmo_ref(t, td, p):
+    # independent evaluation of the closed-form expression (float64, numpy)
+    tl = (np.asarray(t, dtype=np.float64) - 273.15) * 10.0
+    tp = (np.asarray(td, dtype=np.float64) - 273.15) * 10.0
+    dt = tl - tp
+    zt = tp + 0.5 * dt * (0.6 - tp / 700.0)
+    return 273.15 + 0.1 * (tp + dt / (1.0 + 64000.0 * np.exp(11.564 * zt / (1742.0 + zt)) / p))
+
+
+_WB_T = [293.15, 283.15, 303.15, 268.15]
+_WB_TD = [283.15, 280.15, 295.15, 263.15]
+_WB_P = [100000.0, 95000.0, 101325.0, 85000.0]
+
+
+@pytest.mark.parametrize("xp, device", NAMESPACE_DEVICES)
+@pytest.mark.parametrize("dtype", ["float64", "float32"])
+def test_wet_bulb_temperature_cosmo_dewpoint(xp, device, dtype):
+    t, td, p = (xp.asarray(x, dtype=dtype, device=device) for x in (_WB_T, _WB_TD, _WB_P))
+    r = thermo.array.wet_bulb_temperature_from_dewpoint(t, td, p, method="cosmo")
+    assert r.dtype == t.dtype
+    ref = _wet_bulb_cosmo_ref(_WB_T, _WB_TD, _WB_P)
+    assert np.allclose(np.asarray(r, dtype=np.float64), ref, rtol=0, atol=1e-3 if dtype == "float32" else 1e-9)
+    # the result lies between the dewpoint and the temperature
+    assert np.all(np.asarray(r) <= np.asarray(t) + 1e-3)
+    assert np.all(np.asarray(r) >= np.asarray(td) - 1e-3)
+
+
+@pytest.mark.parametrize("xp, device", NAMESPACE_DEVICES)
+def test_wet_bulb_temperature_cosmo_specific_humidity(xp, device):
+    t, q, p = (xp.asarray(x, device=device) for x in (_WB_T, [0.008, 0.006, 0.012, 0.002], _WB_P))
+    td = thermo.array.dewpoint_from_specific_humidity(q, p)
+    r = thermo.array.wet_bulb_temperature_from_specific_humidity(t, q, p, method="cosmo")
+    ref = _wet_bulb_cosmo_ref(_WB_T, np.asarray(td), _WB_P)
+    assert np.allclose(np.asarray(r), ref, rtol=0, atol=1e-9)
+    # zero specific humidity gives nan
+    q0 = xp.asarray([0.0, 0.0, 0.0, 0.0], device=device)
+    r0 = thermo.array.wet_bulb_temperature_from_specific_humidity(t, q0, p, method="cosmo")
+    assert np.all(np.isnan(np.asarray(r0)))
+
+
+@pytest.mark.parametrize("xp, device", NAMESPACE_DEVICES)
+def test_wet_bulb_temperature_cosmo_saturated(xp, device):
+    t, p = xp.asarray([293.15, 273.15], device=device), xp.asarray([100000.0, 90000.0], device=device)
+    r = thermo.array.wet_bulb_temperature_from_dewpoint(t, t, p, method="cosmo")
+    assert np.allclose(np.asarray(r), np.asarray(t), atol=0.05)
+
+
+@pytest.mark.parametrize("xp, device", NAMESPACE_DEVICES)
+def test_wet_bulb_temperature_method_options(xp, device):
+    t, td, p = (xp.asarray(x, device=device) for x in (_WB_T, _WB_TD, _WB_P))
+    # the default is the existing behaviour
+    d = thermo.array.wet_bulb_temperature_from_dewpoint(t, td, p)
+    n = thermo.array.wet_bulb_temperature_from_dewpoint(t, td, p, method="normand")
+    np.testing.assert_array_equal(np.asarray(d), np.asarray(n))
+    # ept_method and t_method are ignored by "cosmo"
+    c1 = thermo.array.wet_bulb_temperature_from_dewpoint(t, td, p, method="cosmo")
+    c2 = thermo.array.wet_bulb_temperature_from_dewpoint(
+        t, td, p, ept_method="bolton39", t_method="newton", method="cosmo"
+    )
+    np.testing.assert_array_equal(np.asarray(c1), np.asarray(c2))
+    with pytest.raises(ValueError):
+        thermo.array.wet_bulb_temperature_from_dewpoint(t, td, p, method="foo")
+    with pytest.raises(ValueError):
+        thermo.array.wet_bulb_temperature_from_specific_humidity(t, td * 0 + 0.005, p, method="foo")

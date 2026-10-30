@@ -531,7 +531,19 @@ def saturation_vapour_pressure(
       the IAPWS reference data between 0 °C and 100 °C for water and between -100 °C and 0 °C
       for ice.
 
-    When ``phase`` is \"mixed\" the formula is based on the value of ``t`` (for both methods):
+    * "cosmo": the Magnus formula with the constants of [Sonntag1990]_ is used when
+      ``phase`` is "water" or "ice":
+
+        .. math::
+
+            e_{sat} = a_{1} exp \left(a_{3}\frac{t_{c}}{t_{c} + b}\right)
+
+      where :math:`t_{c} = t - 273.15` is the temperature in °C and the parameters are set as follows:
+
+      * ``phase`` = "water": :math:`a_{1}` =611.2 Pa, :math:`a_{3}` =17.62 and :math:`b` =243.12 °C
+      * ``phase`` = "ice": :math:`a_{1}` =611.2 Pa, :math:`a_{3}` =22.46 and :math:`b` =272.62 °C
+
+    When ``phase`` is "mixed" the formula is based on the value of ``t`` (for all methods):
 
     * if :math:`t <= t_{i}`: the formula for ``phase`` = \"ice\" is used (:math:`t_{i} = 250.16 K`)
     * if :math:`t >= t_{0}`: the formula for ``phase`` = \"water\" is used (:math:`t_{0} = 273.16 K`)
@@ -1105,6 +1117,7 @@ def temperature_from_saturation_vapour_pressure(
 def relative_humidity_from_dewpoint(
     t: "ArrayLike",
     td: "ArrayLike",
+    method: str = "ifs",
 ) -> "ArrayLike": ...
 
 
@@ -1112,6 +1125,7 @@ def relative_humidity_from_dewpoint(
 def relative_humidity_from_dewpoint(
     t: "xarray.DataArray",
     td: "xarray.DataArray",
+    method: str = "ifs",
 ) -> "xarray.DataArray": ...
 
 
@@ -1119,6 +1133,7 @@ def relative_humidity_from_dewpoint(
 def relative_humidity_from_dewpoint(
     t: "FieldList",
     td: "FieldList",
+    method: str = "ifs",
 ) -> "FieldList": ...
 
 
@@ -1126,12 +1141,14 @@ def relative_humidity_from_dewpoint(
 def relative_humidity_from_dewpoint(
     t: "Field",
     td: "Field",
+    method: str = "ifs",
 ) -> "Field": ...
 
 
 def relative_humidity_from_dewpoint(
     t: "ArrayLike" | "xarray.DataArray" | "FieldList" | "Field",
     td: "ArrayLike" | "xarray.DataArray" | "FieldList" | "Field",
+    method: str = "ifs",
 ) -> "ArrayLike" | "xarray.DataArray" | "FieldList" | "Field":
     r"""Compute the relative humidity from dewpoint temperature.
 
@@ -1141,6 +1158,9 @@ def relative_humidity_from_dewpoint(
         Temperature (K)
     td: array-like | xarray.DataArray | FieldList | Field
         Dewpoint (K)
+    method: str, optional
+        Method of the saturation vapour pressure: "ifs", "huang" or "cosmo".
+        See :func:`saturation_vapour_pressure` for details.
 
     Returns
     -------
@@ -1171,7 +1191,7 @@ def relative_humidity_from_dewpoint(
     The function returns an object of the same type as the input arguments.
     """
     dispatched = dispatch(relative_humidity_from_dewpoint, array=True)
-    return dispatched(t, td)
+    return dispatched(t, td, method=method)
 
 
 @overload
@@ -1179,6 +1199,8 @@ def relative_humidity_from_specific_humidity(
     t: "ArrayLike",
     q: "ArrayLike",
     p: "ArrayLike",
+    phase: str = "mixed",
+    method: str = "ifs",
 ) -> "ArrayLike": ...
 
 
@@ -1187,6 +1209,8 @@ def relative_humidity_from_specific_humidity(
     t: "xarray.DataArray",
     q: "xarray.DataArray",
     p: "xarray.DataArray",
+    phase: str = "mixed",
+    method: str = "ifs",
 ) -> "xarray.DataArray": ...
 
 
@@ -1195,6 +1219,8 @@ def relative_humidity_from_specific_humidity(
     t: "FieldList",
     q: "FieldList",
     p: "FieldList",
+    phase: str = "mixed",
+    method: str = "ifs",
 ) -> "FieldList": ...
 
 
@@ -1203,6 +1229,8 @@ def relative_humidity_from_specific_humidity(
     t: "Field",
     q: "Field",
     p: "Field",
+    phase: str = "mixed",
+    method: str = "ifs",
 ) -> "Field": ...
 
 
@@ -1210,6 +1238,8 @@ def relative_humidity_from_specific_humidity(
     t: "ArrayLike" | "xarray.DataArray" | "FieldList" | "Field",
     q: "ArrayLike" | "xarray.DataArray" | "FieldList" | "Field",
     p: "ArrayLike" | "xarray.DataArray" | "FieldList" | "Field",
+    phase: str = "mixed",
+    method: str = "ifs",
 ) -> "ArrayLike" | "xarray.DataArray" | "FieldList" | "Field":
     r"""Compute the relative humidity from specific humidity.
 
@@ -1221,6 +1251,12 @@ def relative_humidity_from_specific_humidity(
         Specific humidity (kg/kg)
     p: array-like | xarray.DataArray | FieldList | Field
         Pressure (Pa)
+    phase: str, optional
+        Phase of the saturation vapour pressure: "mixed", "water" or "ice".
+        See :func:`saturation_vapour_pressure` for details.
+    method: str, optional
+        Method of the saturation vapour pressure: "ifs", "huang" or "cosmo".
+        See :func:`saturation_vapour_pressure` for details.
 
     Returns
     -------
@@ -1232,12 +1268,12 @@ def relative_humidity_from_specific_humidity(
 
     .. math::
 
-        r = 100 \frac {e(q, p)}{e_{msat}(t)}
+        r = 100 \frac {e(q, p)}{e_{sat}(t)}
 
     where:
 
         * :math:`e` is the vapour pressure (see :func:`vapour_pressure_from_specific_humidity`)
-        * :math:`e_{msat}` is the :func:`saturation_vapour_pressure` based on the \"mixed\" phase
+        * :math:`e_{sat}` is the :func:`saturation_vapour_pressure` with respect to ``phase``
 
 
     Implementations
@@ -1254,13 +1290,14 @@ def relative_humidity_from_specific_humidity(
     The function returns an object of the same type as the input arguments.
     """
     dispatched = dispatch(relative_humidity_from_specific_humidity, array=True)
-    return dispatched(t, q, p)
+    return dispatched(t, q, p, phase=phase, method=method)
 
 
 @overload
 def specific_humidity_from_dewpoint(
     td: "ArrayLike",
     p: "ArrayLike",
+    method: str = "ifs",
 ) -> "ArrayLike": ...
 
 
@@ -1268,6 +1305,7 @@ def specific_humidity_from_dewpoint(
 def specific_humidity_from_dewpoint(
     td: "xarray.DataArray",
     p: "xarray.DataArray",
+    method: str = "ifs",
 ) -> "xarray.DataArray": ...
 
 
@@ -1275,6 +1313,7 @@ def specific_humidity_from_dewpoint(
 def specific_humidity_from_dewpoint(
     td: "FieldList",
     p: "FieldList",
+    method: str = "ifs",
 ) -> "FieldList": ...
 
 
@@ -1282,12 +1321,14 @@ def specific_humidity_from_dewpoint(
 def specific_humidity_from_dewpoint(
     td: "Field",
     p: "Field",
+    method: str = "ifs",
 ) -> "Field": ...
 
 
 def specific_humidity_from_dewpoint(
     td: "ArrayLike" | "xarray.DataArray" | "FieldList" | "Field",
     p: "ArrayLike" | "xarray.DataArray" | "FieldList" | "Field",
+    method: str = "ifs",
 ) -> "ArrayLike" | "xarray.DataArray" | "FieldList" | "Field":
     r"""Compute the specific humidity from dewpoint.
 
@@ -1297,6 +1338,9 @@ def specific_humidity_from_dewpoint(
         Dewpoint (K)
     p: array-like | xarray.DataArray | FieldList | Field
         Pressure (Pa)
+    method: str, optional
+        Method of the saturation vapour pressure: "ifs", "huang" or "cosmo".
+        See :func:`saturation_vapour_pressure` for details.
 
     Returns
     -------
@@ -1333,7 +1377,7 @@ def specific_humidity_from_dewpoint(
     The function returns an object of the same type as the input arguments.
     """
     dispatched = dispatch(specific_humidity_from_dewpoint, array=True)
-    return dispatched(td, p)
+    return dispatched(td, p, method=method)
 
 
 @overload
@@ -2353,7 +2397,8 @@ def ept_from_dewpoint(
     p: array-like | xarray.DataArray | FieldList | Field
         Pressure (Pa)
     method: str, optional
-        Specify the computation method. The possible values are: "ifs", "bolton35", "bolton39", "bolton43".
+        Specify the computation method. The possible values are: "ifs", "bolton35", "bolton39",
+        "bolton43", "cosmo".
 
     Returns
     -------
@@ -2391,6 +2436,13 @@ def ept_from_dewpoint(
             t (\frac{10^{5}}{p})^{\kappa (1-0.28 w)} exp[(\frac{3376}{t_{LCL}} -
             2.54)w(1+0.81w)]
 
+    * "cosmo": the equivalent potential temperature is computed from the temperature and the
+      mixing ratio, without the lifting condensation level:
+
+        .. math::
+
+            \Theta_{e} = \Theta  exp(\frac{L_{v}  w}{c_{pd}  t})
+
     where:
 
         * :math:`\Theta` is the :func:`potential_temperature`
@@ -2399,6 +2451,7 @@ def ept_from_dewpoint(
 
             * method="davis" when ``method`` is "ifs"
             * method="bolton" when ``method`` is "bolton35", "bolton39", or "bolton43"
+              (not used by "cosmo")
         * :math:`q` is the specific humidity computed with :func:`specific_humidity_from_dewpoint`
         * :math:`w`: is the mixing ratio computed with :func:`mixing_ratio_from_dewpoint`
         * :math:`e` is the vapour pressure computed with :func:`vapour_pressure_from_mixing_ratio`
@@ -2480,7 +2533,7 @@ def ept_from_specific_humidity(
         Pressure (Pa)
     method: str, optional
         Specify the computation method. The possible values are: "ifs",
-        "bolton35", "bolton39", "bolton43". See :func:`ept_from_dewpoint` for details.
+        "bolton35", "bolton39", "bolton43", "cosmo". See :func:`ept_from_dewpoint` for details.
 
     Returns
     -------
@@ -2556,6 +2609,7 @@ def saturation_ept(
         Pressure (Pa)
     method: str, optional
         Specifies the computation method. The possible values are: "ifs", "bolton35", "bolton39".
+        The "cosmo" method is not supported here (NotImplementedError).
 
     Returns
     -------
@@ -2666,6 +2720,7 @@ def temperature_on_moist_adiabat(
     ept_method: str, optional
         Specifies the computation method that was used to compute ``ept``. The possible
         values are: "ifs", "bolton35", "bolton39".
+        The "cosmo" method is not supported here (NotImplementedError).
         (See :func:`ept_from_dewpoint` for details.)
     t_method: str, optional
         Specifies the iteration method along the moist adiabat to find the temperature
@@ -2709,6 +2764,7 @@ def wet_bulb_temperature_from_dewpoint(
     p: "ArrayLike",
     ept_method: str = "ifs",
     t_method: str = "bisect",
+    method: str = "normand",
 ) -> "ArrayLike": ...
 
 
@@ -2719,6 +2775,7 @@ def wet_bulb_temperature_from_dewpoint(
     p: "xarray.DataArray",
     ept_method: str = "ifs",
     t_method: str = "bisect",
+    method: str = "normand",
 ) -> "xarray.DataArray": ...
 
 
@@ -2729,6 +2786,7 @@ def wet_bulb_temperature_from_dewpoint(
     p: "FieldList",
     ept_method: str = "ifs",
     t_method: str = "bisect",
+    method: str = "normand",
 ) -> "FieldList": ...
 
 
@@ -2739,6 +2797,7 @@ def wet_bulb_temperature_from_dewpoint(
     p: "Field",
     ept_method: str = "ifs",
     t_method: str = "bisect",
+    method: str = "normand",
 ) -> "Field": ...
 
 
@@ -2748,6 +2807,7 @@ def wet_bulb_temperature_from_dewpoint(
     p: "ArrayLike" | "xarray.DataArray" | "FieldList" | "Field",
     ept_method: str = "ifs",
     t_method: str = "bisect",
+    method: str = "normand",
 ) -> "ArrayLike" | "xarray.DataArray" | "FieldList" | "Field":
     r"""Compute the pseudo adiabatic wet bulb temperature from dewpoint.
 
@@ -2762,6 +2822,7 @@ def wet_bulb_temperature_from_dewpoint(
     ept_method: str, optional
         Specifies the computation method for the equivalent potential temperature.
         The possible values are: "ifs", "bolton35", "bolton39".
+        The "cosmo" method is not supported here (NotImplementedError).
         (See :func:`ept_from_dewpoint` for details.)
     t_method: str, optional
         Specifies the method to find the temperature along the moist adiabat defined
@@ -2769,6 +2830,13 @@ def wet_bulb_temperature_from_dewpoint(
 
         * "bisect": :func:`temperature_on_moist_adiabat` with ``t_method`` = "bisect" is used
         * "newton": :func:`temperature_on_moist_adiabat` with ``t_method`` = "newton" is used
+
+    method: str, optional
+        Specifies the computation method. The possible values are as follows:
+
+        * "normand": Normand's rule is used with ``ept_method`` and ``t_method`` (see below).
+        * "cosmo": a closed-form approximation of the wet bulb temperature is used.
+          ``ept_method`` and ``t_method`` are ignored.
 
     Returns
     -------
@@ -2782,6 +2850,9 @@ def wet_bulb_temperature_from_dewpoint(
       ``ept_method`` (using :func:`ept_from_dewpoint`). This defines the moist adiabat.
     * then the wet bulb potential temperature is determined as the temperature at
       pressure ``p`` on the moist adiabat with the given ``t_method``.
+
+    With ``method`` = "cosmo" the wet bulb temperature is computed from the temperature,
+    the dewpoint and the pressure with an empirical closed-form expression.
 
 
     Implementations
@@ -2798,7 +2869,7 @@ def wet_bulb_temperature_from_dewpoint(
     The function returns an object of the same type as the input arguments.
     """
     dispatched = dispatch(wet_bulb_temperature_from_dewpoint, array=True)
-    return dispatched(t, td, p, ept_method=ept_method, t_method=t_method)
+    return dispatched(t, td, p, ept_method=ept_method, t_method=t_method, method=method)
 
 
 @overload
@@ -2808,6 +2879,7 @@ def wet_bulb_temperature_from_specific_humidity(
     p: "ArrayLike",
     ept_method: str = "ifs",
     t_method: str = "bisect",
+    method: str = "normand",
 ) -> "ArrayLike": ...
 
 
@@ -2818,6 +2890,7 @@ def wet_bulb_temperature_from_specific_humidity(
     p: "xarray.DataArray",
     ept_method: str = "ifs",
     t_method: str = "bisect",
+    method: str = "normand",
 ) -> "xarray.DataArray": ...
 
 
@@ -2828,6 +2901,7 @@ def wet_bulb_temperature_from_specific_humidity(
     p: "FieldList",
     ept_method: str = "ifs",
     t_method: str = "bisect",
+    method: str = "normand",
 ) -> "FieldList": ...
 
 
@@ -2838,6 +2912,7 @@ def wet_bulb_temperature_from_specific_humidity(
     p: "Field",
     ept_method: str = "ifs",
     t_method: str = "bisect",
+    method: str = "normand",
 ) -> "Field": ...
 
 
@@ -2847,6 +2922,7 @@ def wet_bulb_temperature_from_specific_humidity(
     p: "ArrayLike" | "xarray.DataArray" | "FieldList" | "Field",
     ept_method: str = "ifs",
     t_method: str = "bisect",
+    method: str = "normand",
 ) -> "ArrayLike" | "xarray.DataArray" | "FieldList" | "Field":
     r"""Compute the pseudo adiabatic wet bulb temperature from specific humidity.
 
@@ -2861,6 +2937,7 @@ def wet_bulb_temperature_from_specific_humidity(
     ept_method: str, optional
         Specifies the computation method for the equivalent potential temperature.
         The possible values are: "ifs", "bolton35", "bolton39".
+        The "cosmo" method is not supported here (NotImplementedError).
         (See :func:`ept_from_dewpoint` for details.)
     t_method: str, optional
         Specifies the method to find the temperature along the moist adiabat
@@ -2869,6 +2946,14 @@ def wet_bulb_temperature_from_specific_humidity(
 
         * "bisect": :func:`temperature_on_moist_adiabat` with ``t_method`` = "bisect" is used
         * "newton": :func:`temperature_on_moist_adiabat` with ``t_method`` = "newton" is used
+
+    method: str, optional
+        Specifies the computation method. The possible values are as follows:
+
+        * "normand": Normand's rule is used with ``ept_method`` and ``t_method`` (see below).
+        * "cosmo": a closed-form approximation of the wet bulb temperature is used.
+          ``ept_method`` and ``t_method`` are ignored. Where the specific humidity is zero
+          the result is nan.
 
     Returns
     -------
@@ -2882,6 +2967,11 @@ def wet_bulb_temperature_from_specific_humidity(
       ``ept_method`` (using :func:`ept_from_dewpoint`). This defines the moist adiabat.
     * then the wet bulb potential temperature is determined as the temperature at
       pressure ``p`` on the moist adiabat with the given ``t_method``.
+
+    With ``method`` = "cosmo" the wet bulb temperature is computed from the temperature,
+    the dewpoint and the pressure with an empirical closed-form expression. For
+    ``wet_bulb_temperature_from_specific_humidity`` the dewpoint is first derived with
+    :func:`dewpoint_from_specific_humidity`.
 
 
     Implementations
@@ -2898,7 +2988,7 @@ def wet_bulb_temperature_from_specific_humidity(
     The function returns an object of the same type as the input arguments.
     """
     dispatched = dispatch(wet_bulb_temperature_from_specific_humidity, array=True)
-    return dispatched(t, q, p, ept_method=ept_method, t_method=t_method)
+    return dispatched(t, q, p, ept_method=ept_method, t_method=t_method, method=method)
 
 
 @overload
@@ -2961,6 +3051,7 @@ def wet_bulb_potential_temperature_from_dewpoint(
     ept_method: str, optional
         Specifies the computation method for the equivalent potential temperature.
         The possible values are: "ifs", "bolton35", "bolton39".
+        The "cosmo" method is not supported here (NotImplementedError).
         (See :func:`ept_from_dewpoint` for details.)
     t_method: str, optional
         Specifies the method to find the temperature along the moist adiabat defined
@@ -3061,6 +3152,7 @@ def wet_bulb_potential_temperature_from_specific_humidity(
     ept_method: str, optional
         Specifies the computation method for the equivalent potential temperature.
         The possible values are: "ifs", "bolton35", "bolton39".
+        The "cosmo" method is not supported here (NotImplementedError).
         (See :func:`ept_from_dewpoint` for details.)
     t_method: str, optional
         Specifies the method to find the temperature along the moist adiabat
@@ -3159,3 +3251,248 @@ def specific_gas_constant(
     """
     dispatched = dispatch(specific_gas_constant, array=True)
     return dispatched(q)
+
+
+@overload
+def bulk_richardson_number(
+    theta_v: "ArrayLike",
+    z: "ArrayLike",
+    u: "ArrayLike",
+    v: "ArrayLike",
+    z_sfc: "ArrayLike" = 0.0,
+    vertical_dim: int = 0,
+    vmin: float = 1.0e-3,
+) -> "ArrayLike": ...
+
+
+@overload
+def bulk_richardson_number(
+    theta_v: "xarray.DataArray",
+    z: "xarray.DataArray",
+    u: "xarray.DataArray",
+    v: "xarray.DataArray",
+    z_sfc: "xarray.DataArray | float" = 0.0,
+    vertical_dim: str = "z",
+    vmin: float = 1.0e-3,
+) -> "xarray.DataArray": ...
+
+
+def bulk_richardson_number(
+    theta_v: "ArrayLike | xarray.DataArray",
+    z: "ArrayLike | xarray.DataArray",
+    u: "ArrayLike | xarray.DataArray",
+    v: "ArrayLike | xarray.DataArray",
+    z_sfc: "ArrayLike | xarray.DataArray | float" = 0.0,
+    vertical_dim: "int | str | None" = None,
+    vmin: float = 1.0e-3,
+) -> "ArrayLike | xarray.DataArray":
+    r"""Compute the bulk Richardson number on each level relative to the lowest level.
+
+    *New in version 1.4.0*
+
+    Parameters
+    ----------
+    theta_v: array-like | xarray.DataArray
+        Virtual potential temperature on levels (K)
+    z: array-like | xarray.DataArray
+        Height of the levels above sea level (m)
+    u: array-like | xarray.DataArray
+        Eastward wind component on levels (m/s)
+    v: array-like | xarray.DataArray
+        Northward wind component on levels (m/s)
+    z_sfc: array-like | xarray.DataArray | float, optional
+        Surface height above sea level (m), without the vertical axis (default: 0)
+    vertical_dim: int | str, optional
+        Vertical axis: an int for array-like input (default 0), the name of the
+        vertical dimension for xarray input (default ``"z"``). Levels are ordered
+        from the top down.
+    vmin: float, optional
+        Lower bound of the wind speed (m/s) in the denominator (default: 1e-3)
+
+    Returns
+    -------
+    array-like | xarray.DataArray
+        Bulk Richardson number (dimensionless) on each level
+
+    See Also
+    --------
+    earthkit.meteo.thermo.array.bulk_richardson_number
+
+
+    Implementations
+    ------------------------
+    :func:`bulk_richardson_number` calls one of the following implementations depending on
+    the type of the input arguments:
+
+    - :py:meth:`earthkit.meteo.thermo.array.bulk_richardson_number` for array-like
+    - :py:meth:`earthkit.meteo.thermo.xarray.bulk_richardson_number`
+      for xarray.DataArray
+
+    The function returns an object of the same type as the ``theta_v`` argument.
+    """
+    kwargs = {} if vertical_dim is None else {"vertical_dim": vertical_dim}
+    return dispatch(bulk_richardson_number, xarray=True, fieldlist=False, array=True)(
+        theta_v, z, u, v, z_sfc=z_sfc, vmin=vmin, **kwargs
+    )
+
+
+@overload
+def pbl_height_bulk_richardson(
+    theta_v: "ArrayLike",
+    z: "ArrayLike",
+    u: "ArrayLike",
+    v: "ArrayLike",
+    z_sfc: "ArrayLike" = 0.0,
+    ri_crit: float = 0.22,
+    vertical_dim: int = 0,
+    vmin: float = 1.0e-3,
+) -> "ArrayLike": ...
+
+
+@overload
+def pbl_height_bulk_richardson(
+    theta_v: "xarray.DataArray",
+    z: "xarray.DataArray",
+    u: "xarray.DataArray",
+    v: "xarray.DataArray",
+    z_sfc: "xarray.DataArray | float" = 0.0,
+    ri_crit: float = 0.22,
+    vertical_dim: str = "z",
+    vmin: float = 1.0e-3,
+) -> "xarray.DataArray": ...
+
+
+def pbl_height_bulk_richardson(
+    theta_v: "ArrayLike | xarray.DataArray",
+    z: "ArrayLike | xarray.DataArray",
+    u: "ArrayLike | xarray.DataArray",
+    v: "ArrayLike | xarray.DataArray",
+    z_sfc: "ArrayLike | xarray.DataArray | float" = 0.0,
+    ri_crit: float = 0.22,
+    vertical_dim: "int | str | None" = None,
+    vmin: float = 1.0e-3,
+) -> "ArrayLike | xarray.DataArray":
+    r"""Compute the boundary layer height from the bulk Richardson number.
+
+    *New in version 1.4.0*
+
+    Parameters
+    ----------
+    theta_v: array-like | xarray.DataArray
+        Virtual potential temperature on levels (K)
+    z: array-like | xarray.DataArray
+        Height of the levels above sea level (m)
+    u: array-like | xarray.DataArray
+        Eastward wind component on levels (m/s)
+    v: array-like | xarray.DataArray
+        Northward wind component on levels (m/s)
+    z_sfc: array-like | xarray.DataArray | float, optional
+        Surface height above sea level (m), without the vertical axis (default: 0)
+    ri_crit: float, optional
+        Critical bulk Richardson number, must be positive (default: 0.22).
+        This is a typical value; the literature uses values from about 0.2 to 0.5.
+    vertical_dim: int | str, optional
+        Vertical axis: an int for array-like input (default 0), the name of the
+        vertical dimension for xarray input (default ``"z"``). Levels are ordered
+        from the top down.
+    vmin: float, optional
+        Lower bound of the wind speed (m/s) in the denominator of the bulk Richardson
+        number (default: 1e-3)
+
+    Returns
+    -------
+    array-like | xarray.DataArray
+        Boundary layer height above ground (m), without the vertical axis. It is nan where
+        the bulk Richardson number does not exceed ``ri_crit`` on any level.
+
+    See Also
+    --------
+    earthkit.meteo.thermo.array.pbl_height_bulk_richardson
+    bulk_richardson_number
+
+
+    Implementations
+    ------------------------
+    :func:`pbl_height_bulk_richardson` calls one of the following implementations depending on
+    the type of the input arguments:
+
+    - :py:meth:`earthkit.meteo.thermo.array.pbl_height_bulk_richardson` for array-like
+    - :py:meth:`earthkit.meteo.thermo.xarray.pbl_height_bulk_richardson`
+      for xarray.DataArray
+
+    The function returns an object of the same type as the ``theta_v`` argument.
+    """
+    kwargs = {} if vertical_dim is None else {"vertical_dim": vertical_dim}
+    return dispatch(pbl_height_bulk_richardson, xarray=True, fieldlist=False, array=True)(
+        theta_v, z, u, v, z_sfc=z_sfc, ri_crit=ri_crit, vmin=vmin, **kwargs
+    )
+
+
+@overload
+def k_index(
+    t: "ArrayLike",
+    td: "ArrayLike",
+    p: "ArrayLike",
+    vertical_dim: int = 0,
+    max_diff: float = 3000.0,
+) -> "ArrayLike": ...
+
+
+@overload
+def k_index(
+    t: "xarray.DataArray",
+    td: "xarray.DataArray",
+    p: "xarray.DataArray",
+    vertical_dim: str = "z",
+    max_diff: float = 3000.0,
+) -> "xarray.DataArray": ...
+
+
+def k_index(
+    t: "ArrayLike | xarray.DataArray",
+    td: "ArrayLike | xarray.DataArray",
+    p: "ArrayLike | xarray.DataArray",
+    vertical_dim: "int | str | None" = None,
+    max_diff: float = 3000.0,
+) -> "ArrayLike | xarray.DataArray":
+    r"""Compute the K index from temperature and dewpoint on levels.
+
+    *New in version 1.4.0*
+
+    Parameters
+    ----------
+    t: array-like | xarray.DataArray
+        Temperature on levels (K)
+    td: array-like | xarray.DataArray
+        Dewpoint temperature on levels (K)
+    p: array-like | xarray.DataArray
+        Pressure of the levels (Pa)
+    vertical_dim: int | str, optional
+        Vertical axis: an int for array-like input (default 0), the name of the
+        vertical dimension for xarray input (default ``"z"``).
+    max_diff: float, optional
+        Largest accepted distance (Pa) between a level and each of the 850, 700 and
+        500 hPa targets (default: 3000)
+
+    Returns
+    -------
+    array-like | xarray.DataArray
+        K index (K), without the vertical axis
+
+    See Also
+    --------
+    earthkit.meteo.thermo.array.k_index
+
+
+    Implementations
+    ---------------
+    :func:`k_index` calls one of the following implementations depending on
+    the type of the input arguments:
+
+    - :py:meth:`earthkit.meteo.thermo.array.k_index` for array-like
+    - :py:meth:`earthkit.meteo.thermo.xarray.k_index` for xarray.DataArray
+
+    The function returns an object of the same type as the ``t`` argument.
+    """
+    kwargs = {} if vertical_dim is None else {"vertical_dim": vertical_dim}
+    return dispatch(k_index, xarray=True, fieldlist=False, array=True)(t, td, p, max_diff=max_diff, **kwargs)

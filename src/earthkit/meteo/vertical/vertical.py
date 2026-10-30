@@ -1502,6 +1502,187 @@ def interpolate_to_pressure_levels(data, p, target_p, target_p_units="Pa", inter
     )
 
 
+@overload
+def extrapolate_below_lowest_level(
+    data: "ArrayLike",
+    z: "ArrayLike",
+    target_z: "ArrayLike",
+    mode: Literal["lapse_rate", "constant", "linear", "hydrostatic"] = "lapse_rate",
+    lapse_rate: "ArrayLike" = constants.standard_lapse_rate,
+    vertical_dim: int = 0,
+    start_z: "ArrayLike | None" = None,
+    start_value: "ArrayLike | None" = None,
+    t_start: "ArrayLike | None" = None,
+) -> "ArrayLike": ...
+
+
+@overload
+def extrapolate_below_lowest_level(
+    data: "xarray.DataArray",
+    z: "xarray.DataArray",
+    target_z: "xarray.DataArray | float",
+    mode: Literal["lapse_rate", "constant", "linear", "hydrostatic"] = "lapse_rate",
+    lapse_rate: "xarray.DataArray | float" = constants.standard_lapse_rate,
+    vertical_dim: str = "z",
+    start_z: "xarray.DataArray | float | None" = None,
+    start_value: "xarray.DataArray | float | None" = None,
+    t_start: "xarray.DataArray | float | None" = None,
+) -> "xarray.DataArray": ...
+
+
+def extrapolate_below_lowest_level(
+    data: "ArrayLike",
+    z: "ArrayLike",
+    target_z: "ArrayLike",
+    mode: Literal["lapse_rate", "constant", "linear", "hydrostatic"] = "lapse_rate",
+    lapse_rate: "ArrayLike" = constants.standard_lapse_rate,
+    vertical_dim: "int | str | None" = None,
+    start_z: "ArrayLike | None" = None,
+    start_value: "ArrayLike | None" = None,
+    t_start: "ArrayLike | None" = None,
+) -> "ArrayLike":
+    r"""Extrapolate data to target heights below a start level, by default the lowest level.
+
+    *New in version 1.4.0*
+
+    Parameters
+    ----------
+    data: array-like
+        Data on levels.
+    z: array-like
+        Height of the levels of ``data``.
+    target_z: array-like
+        Target heights, same units and datum as ``z``.
+    mode: str, optional
+        "lapse_rate" (default), "constant", "linear" or "hydrostatic" (pressure from a
+        start temperature and a lapse rate).
+    lapse_rate: array-like, optional
+        Lapse rate [K/m] for ``mode="lapse_rate"`` and ``mode="hydrostatic"`` (default:
+        :data:`earthkit.meteo.constants.standard_lapse_rate`).
+    vertical_dim: int | str, optional
+        Vertical axis: an int for array-like input (default 0), the name of the vertical
+        dimension for xarray input (default ``"z"``).
+    start_z, start_value: array-like, optional
+        Start level height and data, given together; they replace the lowest level, so the
+        result is defined wherever ``target_z <= start_z``. Not allowed with "linear".
+    t_start: array-like, optional
+        Temperature [K] at the start level; required by "hydrostatic" and only by it.
+
+    Returns
+    -------
+    array-like
+        Extrapolated data; nan where the target lies above the start level.
+
+    See :py:meth:`earthkit.meteo.vertical.array.extrapolate_below_lowest_level` for the
+    formulas.
+
+
+    Implementations
+    ---------------
+    :func:`extrapolate_below_lowest_level` calls one of the following implementations
+    depending on the type of the input arguments:
+
+    - :py:meth:`earthkit.meteo.vertical.array.extrapolate_below_lowest_level` for array-like
+    - :py:meth:`earthkit.meteo.vertical.xarray.extrapolate_below_lowest_level` for xarray.DataArray
+
+    The function returns an object of the same type as the ``data`` argument.
+
+    """
+    kwargs = {} if vertical_dim is None else {"vertical_dim": vertical_dim}
+    return dispatch(extrapolate_below_lowest_level, xarray=True, fieldlist=False, array=True)(
+        data,
+        z,
+        target_z,
+        mode=mode,
+        lapse_rate=lapse_rate,
+        start_z=start_z,
+        start_value=start_value,
+        t_start=t_start,
+        **kwargs,
+    )
+
+
+@overload
+def height_of_isotherm(
+    t: "ArrayLike",
+    z: "ArrayLike",
+    t_target: float = constants.T_C2K,
+    z_max: float | None = None,
+    zs: "ArrayLike | None" = None,
+    extrapolate: bool = False,
+    vertical_dim: int = 0,
+) -> "ArrayLike": ...
+
+
+@overload
+def height_of_isotherm(
+    t: "xarray.DataArray",
+    z: "xarray.DataArray",
+    t_target: float = constants.T_C2K,
+    z_max: float | None = None,
+    zs: "xarray.DataArray | None" = None,
+    extrapolate: bool = False,
+    vertical_dim: str = "z",
+) -> "xarray.DataArray": ...
+
+
+def height_of_isotherm(
+    t: "ArrayLike | xarray.DataArray",
+    z: "ArrayLike | xarray.DataArray",
+    t_target: float = constants.T_C2K,
+    z_max: float | None = None,
+    zs: "ArrayLike | xarray.DataArray | None" = None,
+    extrapolate: bool = False,
+    vertical_dim: "int | str | None" = None,
+) -> "ArrayLike | xarray.DataArray":
+    r"""Height where the temperature first reaches ``t_target`` when going down a column.
+
+    *New in version 1.4.0*
+
+    Parameters
+    ----------
+    t : array-like | xarray.DataArray
+        Temperature on levels [K].
+    z : array-like | xarray.DataArray
+        Height of the levels [m], monotonic along the vertical axis.
+    t_target : float, default=:data:`earthkit.meteo.constants.T_C2K`
+        Temperature of the isotherm [K] (default: 0 degC).
+    z_max : float or None, default=None
+        Height [m] above ``zs`` where the search starts. ``None`` starts at the top level.
+    zs : array-like | xarray.DataArray, optional
+        Surface height [m]. ``None`` measures ``z_max`` from the datum of ``z``.
+    extrapolate : bool, default=False
+        Extrapolate below the lowest level when no crossing is found.
+    vertical_dim : int | str, optional
+        Vertical axis: an int for array-like input (default 0), the name of the vertical
+        dimension for xarray input (default ``"z"``).
+
+    Returns
+    -------
+    array-like | xarray.DataArray
+        Height of the isotherm [m]; nan where no crossing is found.
+
+    See Also
+    --------
+    earthkit.meteo.vertical.array.height_of_isotherm
+
+
+    Implementations
+    ---------------
+    :func:`height_of_isotherm` calls one of the following implementations
+    depending on the type of the input arguments:
+
+    - :py:meth:`earthkit.meteo.vertical.array.height_of_isotherm` for array-like
+    - :py:meth:`earthkit.meteo.vertical.xarray.height_of_isotherm` for xarray.DataArray
+
+    The function returns an object of the same type as the ``t`` argument.
+    """
+    kwargs = {} if vertical_dim is None else {"vertical_dim": vertical_dim}
+    return dispatch(height_of_isotherm, xarray=True, fieldlist=False, array=True)(
+        t, z, t_target=t_target, z_max=z_max, zs=zs, extrapolate=extrapolate, **kwargs
+    )
+
+
 def interpolate_sleve_to_coord_levels(data, h, coord, target_coords, folding_mode="undef_fold", vertical_dim="z"):
     r"""Interpolate data from SLEVE levels to coordinate levels.
 
@@ -1587,6 +1768,76 @@ def interpolate_sleve_to_theta_levels(
         target_t_units=target_t_units,
         folding_mode=folding_mode,
         vertical_dim=vertical_dim,
+    )
+
+
+@overload
+def nearest_level_index(
+    coords: "ArrayLike",
+    target_coords: "ArrayLike",
+    max_diff: float | None = None,
+    vertical_dim: int = 0,
+) -> "ArrayLike": ...
+
+
+@overload
+def nearest_level_index(
+    coords: "xarray.DataArray",
+    target_coords: "xarray.DataArray | float",
+    max_diff: float | None = None,
+    vertical_dim: str = "z",
+) -> "xarray.DataArray": ...
+
+
+def nearest_level_index(
+    coords: "ArrayLike | xarray.DataArray",
+    target_coords: "ArrayLike | xarray.DataArray | float",
+    max_diff: float | None = None,
+    vertical_dim: "int | str | None" = None,
+) -> "ArrayLike | xarray.DataArray":
+    r"""Index of the level nearest to each target coordinate, per column.
+
+    *New in version 1.4.0*
+
+    Parameters
+    ----------
+    coords : array-like | xarray.DataArray
+        Vertical coordinate of the levels (e.g. pressure or height). Levels where
+        ``coords`` is nan are never selected.
+    target_coords : array-like | xarray.DataArray | float
+        Target coordinates, same type and units as ``coords``.
+    max_diff : float, optional
+        Largest accepted distance between a level and its target. When the nearest
+        level is farther away the result is -1. ``None`` (default) accepts any distance.
+    vertical_dim : int | str, optional
+        Vertical axis of ``coords``: an int for array-like input (default 0), the name
+        of the vertical dimension for xarray input (default ``"z"``).
+
+    Returns
+    -------
+    array-like | xarray.DataArray
+        Integer level indices. On a tie the lower index wins. The index is -1 where the
+        nearest level is farther than ``max_diff``, where the target is nan, or where
+        the column has no valid level.
+
+    See Also
+    --------
+    earthkit.meteo.vertical.array.nearest_level_index
+
+
+    Implementations
+    ---------------
+    :func:`nearest_level_index` calls one of the following implementations
+    depending on the type of the input arguments:
+
+    - :py:meth:`earthkit.meteo.vertical.array.nearest_level_index` for array-like
+    - :py:meth:`earthkit.meteo.vertical.xarray.nearest_level_index` for xarray.DataArray
+
+    The function returns an object of the same type as the ``coords`` argument.
+    """
+    kwargs = {} if vertical_dim is None else {"vertical_dim": vertical_dim}
+    return dispatch(nearest_level_index, xarray=True, fieldlist=False, array=True)(
+        coords, target_coords, max_diff=max_diff, **kwargs
     )
 
 

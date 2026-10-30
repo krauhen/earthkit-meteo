@@ -125,7 +125,7 @@ def test_xr_mixing_ratio_from_vapour_pressure(e, p):
         assert out.ndim == 0
 
 
-@pytest.mark.parametrize("method", ["ifs", "huang"])
+@pytest.mark.parametrize("method", ["ifs", "huang", "cosmo"])
 @pytest.mark.parametrize(
     "t,phase",
     [
@@ -143,7 +143,7 @@ def test_xr_saturation_vapour_pressure(t, phase, method):
     assert out.attrs["method"] == method
 
 
-@pytest.mark.parametrize("method", ["ifs", "huang"])
+@pytest.mark.parametrize("method", ["ifs", "huang", "cosmo"])
 @pytest.mark.parametrize(
     "t,p,phase",
     [
@@ -160,7 +160,7 @@ def test_xr_saturation_mixing_ratio(t, p, phase, method):
     assert out.attrs["method"] == method
 
 
-@pytest.mark.parametrize("method", ["ifs", "huang"])
+@pytest.mark.parametrize("method", ["ifs", "huang", "cosmo"])
 @pytest.mark.parametrize(
     "t,p,phase",
     [
@@ -177,7 +177,7 @@ def test_xr_saturation_specific_humidity(t, p, phase, method):
     assert out.attrs["method"] == method
 
 
-@pytest.mark.parametrize("method", ["ifs", "huang"])
+@pytest.mark.parametrize("method", ["ifs", "huang", "cosmo"])
 @pytest.mark.parametrize(
     "t,phase",
     [
@@ -193,7 +193,7 @@ def test_xr_saturation_vapour_pressure_slope(t, phase, method):
     assert out.attrs["method"] == method
 
 
-@pytest.mark.parametrize("method", ["ifs", "huang"])
+@pytest.mark.parametrize("method", ["ifs", "huang", "cosmo"])
 @pytest.mark.parametrize(
     "t,p,phase",
     [
@@ -210,7 +210,7 @@ def test_xr_saturation_mixing_ratio_slope(t, p, phase, method):
     assert out.attrs["method"] == method
 
 
-@pytest.mark.parametrize("method", ["ifs", "huang"])
+@pytest.mark.parametrize("method", ["ifs", "huang", "cosmo"])
 @pytest.mark.parametrize(
     "t,p,phase",
     [
@@ -476,6 +476,7 @@ def test_xr_lcl(t, td, p, method):
         (293.15, 283.15, 100000.0, "ifs"),
         (293.15, 283.15, 100000.0, "bolton35"),
         (293.15, 283.15, 100000.0, "bolton39"),
+        (293.15, 283.15, 100000.0, "cosmo"),
     ],
 )
 def test_xr_ept_from_dewpoint(t, td, p, method):
@@ -492,6 +493,7 @@ def test_xr_ept_from_dewpoint(t, td, p, method):
     "t,q,p,method",
     [
         (293.15, 0.01, 100000.0, "ifs"),
+        (293.15, 0.01, 100000.0, "cosmo"),
     ],
 )
 def test_xr_ept_from_specific_humidity(t, q, p, method):
@@ -635,3 +637,153 @@ def test_xr_specific_gas_constant(q):
     ref = thermo.array.specific_gas_constant(_np(q))
     assert np.allclose(out.values, ref, equal_nan=True)
     assert out.ndim == 0
+
+
+def _ri_inputs():
+    import xarray as xr
+
+    dims = ("z", "x")
+    theta_v = xr.DataArray([[310.0, 312.0], [305.0, 306.0], [300.0, 301.0]], dims=dims)
+    z = xr.DataArray([[2000.0, 2100.0], [1000.0, 1100.0], [100.0, 150.0]], dims=dims)
+    u = xr.DataArray([[5.0, 6.0], [3.0, 4.0], [1.0, 2.0]], dims=dims)
+    return theta_v, z, u, xr.zeros_like(u)
+
+
+def test_xr_bulk_richardson_number():
+    import xarray as xr
+
+    theta_v, z, u, v = _ri_inputs()
+    z_sfc = xr.DataArray([0.0, 50.0], dims=("x",))
+    out = thermo.bulk_richardson_number(theta_v, z, u, v, z_sfc=z_sfc)
+    ref = thermo.array.bulk_richardson_number(_np(theta_v), _np(z), _np(u), _np(v), z_sfc=np.array([0.0, 50.0]))
+    assert isinstance(out, xr.DataArray)
+    assert out.dims == ("z", "x")
+    assert np.allclose(out.values, ref)
+
+
+def test_xr_bulk_richardson_number_vertical_dim():
+    theta_v, z, u, v = _ri_inputs()
+    out = thermo.bulk_richardson_number(
+        theta_v.transpose("x", "z"),
+        z.transpose("x", "z"),
+        u.transpose("x", "z"),
+        v.transpose("x", "z"),
+    )
+    ref = thermo.bulk_richardson_number(theta_v, z, u, v)
+    assert out.dims == ("x", "z")
+    assert np.allclose(out.transpose("z", "x").values, ref.values)
+
+
+def test_xr_pbl_height_bulk_richardson():
+    import xarray as xr
+
+    theta_v, z, u, v = _ri_inputs()
+    z_sfc = xr.DataArray([0.0, 50.0], dims=("x",))
+    out = thermo.thermo.pbl_height_bulk_richardson(theta_v, z, u, v, z_sfc=z_sfc, ri_crit=0.1)
+    ref = thermo.array.pbl_height_bulk_richardson(
+        _np(theta_v), _np(z), _np(u), _np(v), z_sfc=np.array([0.0, 50.0]), ri_crit=0.1
+    )
+    assert isinstance(out, xr.DataArray)
+    assert out.dims == ("x",)
+    assert out.attrs["units"] == "m"
+    assert not np.isnan(ref).any()
+    assert np.allclose(out.values, ref)
+
+
+def test_xr_pbl_height_bulk_richardson_vertical_dim():
+    theta_v, z, u, v = _ri_inputs()
+    kw = {"ri_crit": 0.1}
+    out = thermo.thermo.pbl_height_bulk_richardson(
+        theta_v.transpose("x", "z"),
+        z.transpose("x", "z"),
+        u.transpose("x", "z"),
+        v.transpose("x", "z"),
+        **kw,
+    )
+    ref = thermo.thermo.pbl_height_bulk_richardson(theta_v, z, u, v, **kw)
+    assert out.dims == ("x",)
+    assert np.allclose(out.values, ref.values)
+
+
+def _ki_inputs():
+    import xarray as xr
+
+    dims = ("z", "x")
+    p = xr.DataArray(
+        [[30000.0, 30000.0], [50000.0, 51000.0], [70000.0, 72000.0], [85000.0, 89000.0], [100000.0, 100000.0]],
+        dims=dims,
+    )
+    t = xr.DataArray([[230.0, 231.0], [255.0, 256.0], [275.0, 276.0], [285.0, 286.0], [295.0, 296.0]], dims=dims)
+    td = xr.DataArray([[200.0, 201.0], [240.0, 241.0], [268.0, 266.0], [281.0, 280.0], [290.0, 291.0]], dims=dims)
+    return t, td, p
+
+
+def test_xr_k_index():
+    import xarray as xr
+
+    t, td, p = _ki_inputs()
+    out = thermo.k_index(t, td, p, max_diff=5000.0)
+    ref = thermo.array.k_index(_np(t), _np(td), _np(p), max_diff=5000.0)
+    assert isinstance(out, xr.DataArray)
+    assert out.dims == ("x",)
+    assert np.allclose(out.values, ref)
+
+    # default tolerance: column 1 has no level near 850 hPa
+    out = thermo.k_index(t, td, p)
+    assert np.isnan(out.values[1]) and not np.isnan(out.values[0])
+
+
+def test_xr_k_index_vertical_dim():
+    t, td, p = _ki_inputs()
+    ref = thermo.k_index(t, td, p, max_diff=5000.0)
+    out = thermo.k_index(t.transpose("x", "z"), td.transpose("x", "z"), p.transpose("x", "z"), max_diff=5000.0)
+    assert out.dims == ("x",)
+    assert np.allclose(out.values, ref.values)
+
+
+@pytest.mark.parametrize("method", ["ifs", "cosmo"])
+def test_xr_humidity_from_dewpoint_method(method):
+    t = np.array([263.15, 283.15, 303.15])
+    td = np.array([258.15, 278.15, 291.15])
+    q = np.array([0.001, 0.005, 0.012])
+    p = np.array([80000.0, 90000.0, 101325.0])
+
+    out = thermo.relative_humidity_from_dewpoint(_xr_da_1d(t), _xr_da_1d(td), method=method)
+    ref = thermo.array.relative_humidity_from_dewpoint(t, td, method=method)
+    assert np.allclose(out.values, ref)
+    assert out.attrs["method"] == method
+
+    out = thermo.specific_humidity_from_dewpoint(_xr_da_1d(td), _xr_da_1d(p), method=method)
+    ref = thermo.array.specific_humidity_from_dewpoint(td, p, method=method)
+    assert np.allclose(out.values, ref)
+    assert out.attrs["method"] == method
+
+    out = thermo.relative_humidity_from_specific_humidity(
+        _xr_da_1d(t), _xr_da_1d(q), _xr_da_1d(p), phase="water", method=method
+    )
+    ref = thermo.array.relative_humidity_from_specific_humidity(t, q, p, phase="water", method=method)
+    assert np.allclose(out.values, ref)
+    assert out.attrs["method"] == method
+    assert out.attrs["phase"] == "water"
+
+
+def test_xr_humidity_invalid_method():
+    t = _xr_da_1d([280.0])
+    with pytest.raises(ValueError):
+        thermo.relative_humidity_from_dewpoint(t, t - 5.0, method="unknown")
+
+
+@pytest.mark.parametrize("fn", ["dewpoint", "specific_humidity"])
+def test_xr_wet_bulb_temperature_cosmo(fn):
+    import xarray as xr
+
+    t = xr.DataArray(np.array([293.15, 283.15, 303.15]), dims="x")
+    x = xr.DataArray(
+        np.array([283.15, 280.15, 295.15]) if fn == "dewpoint" else np.array([0.008, 0.006, 0.012]), dims="x"
+    )
+    p = xr.DataArray(np.array([100000.0, 95000.0, 101325.0]), dims="x")
+    name = f"wet_bulb_temperature_from_{fn}"
+    out = getattr(thermo, name)(t, x, p, method="cosmo")
+    ref = getattr(thermo.array, name)(t.values, x.values, p.values, method="cosmo")
+    assert isinstance(out, xr.DataArray)
+    np.testing.assert_allclose(out.values, ref)

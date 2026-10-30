@@ -12,15 +12,18 @@ Thermo related functions operating on xarray objects.
 """
 
 from .thermo import (
+    bulk_richardson_number,
     dewpoint_from_relative_humidity,
     dewpoint_from_specific_humidity,
     ept_from_dewpoint,
     ept_from_specific_humidity,
+    k_index,
     lcl,
     lcl_temperature,
     mixing_ratio_from_dewpoint,
     mixing_ratio_from_specific_humidity,
     mixing_ratio_from_vapour_pressure,
+    pbl_height_bulk_richardson,
     potential_temperature,
     pressure_on_dry_adiabat,
     relative_humidity_from_dewpoint,
@@ -53,16 +56,19 @@ from .thermo import (
 
 __all__ = [
     "_celsius_to_kelvin",
+    "bulk_richardson_number",
     "dewpoint_from_relative_humidity",
     "dewpoint_from_specific_humidity",
     "ept_from_dewpoint",
     "ept_from_specific_humidity",
+    "k_index",
     "_kelvin_to_celsius",
     "lcl",
     "lcl_temperature",
     "mixing_ratio_from_dewpoint",
     "mixing_ratio_from_specific_humidity",
     "mixing_ratio_from_vapour_pressure",
+    "pbl_height_bulk_richardson",
     "potential_temperature",
     "pressure_on_dry_adiabat",
     "relative_humidity_from_dewpoint",
