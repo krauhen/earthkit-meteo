@@ -1591,6 +1591,76 @@ def interpolate_sleve_to_theta_levels(
 
 
 @overload
+def nearest_level_index(
+    coords: "ArrayLike",
+    target_coords: "ArrayLike",
+    max_diff: float | None = None,
+    vertical_dim: int = 0,
+) -> "ArrayLike": ...
+
+
+@overload
+def nearest_level_index(
+    coords: "xarray.DataArray",
+    target_coords: "xarray.DataArray | float",
+    max_diff: float | None = None,
+    vertical_dim: str = "z",
+) -> "xarray.DataArray": ...
+
+
+def nearest_level_index(
+    coords: "ArrayLike | xarray.DataArray",
+    target_coords: "ArrayLike | xarray.DataArray | float",
+    max_diff: float | None = None,
+    vertical_dim: "int | str | None" = None,
+) -> "ArrayLike | xarray.DataArray":
+    r"""Index of the level nearest to each target coordinate, per column.
+
+    *New in version 1.4.0*
+
+    Parameters
+    ----------
+    coords : array-like | xarray.DataArray
+        Vertical coordinate of the levels (e.g. pressure or height). Levels where
+        ``coords`` is nan are never selected.
+    target_coords : array-like | xarray.DataArray | float
+        Target coordinates, same type and units as ``coords``.
+    max_diff : float, optional
+        Largest accepted distance between a level and its target. When the nearest
+        level is farther away the result is -1. ``None`` (default) accepts any distance.
+    vertical_dim : int | str, optional
+        Vertical axis of ``coords``: an int for array-like input (default 0), the name
+        of the vertical dimension for xarray input (default ``"z"``).
+
+    Returns
+    -------
+    array-like | xarray.DataArray
+        Integer level indices. On a tie the lower index wins. The index is -1 where the
+        nearest level is farther than ``max_diff``, where the target is nan, or where
+        the column has no valid level.
+
+    See Also
+    --------
+    earthkit.meteo.vertical.array.nearest_level_index
+
+
+    Implementations
+    ---------------
+    :func:`nearest_level_index` calls one of the following implementations
+    depending on the type of the input arguments:
+
+    - :py:meth:`earthkit.meteo.vertical.array.nearest_level_index` for array-like
+    - :py:meth:`earthkit.meteo.vertical.xarray.nearest_level_index` for xarray.DataArray
+
+    The function returns an object of the same type as the ``coords`` argument.
+    """
+    kwargs = {} if vertical_dim is None else {"vertical_dim": vertical_dim}
+    return dispatch(nearest_level_index, xarray=True, fieldlist=False, array=True)(
+        coords, target_coords, max_diff=max_diff, **kwargs
+    )
+
+
+@overload
 def extrapolate_temperature_to_pressure_levels_below_surface(
     t_sfc: "ArrayLike",
     h_sfc: "ArrayLike",
