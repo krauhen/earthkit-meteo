@@ -1537,6 +1537,7 @@ def wet_bulb_temperature_from_dewpoint(
     p: FieldList | Field | Iterable[float] | float | None = None,
     ept_method: str = "ifs",
     t_method: str = "bisect",
+    method: str = "normand",
 ) -> FieldList | Field:
     r"""Compute the pseudo adiabatic wet bulb temperature from dewpoint.
 
@@ -1563,6 +1564,13 @@ def wet_bulb_temperature_from_dewpoint(
         * "bisect": :func:`temperature_on_moist_adiabat` with ``t_method`` = "bisect" is used
         * "newton": :func:`temperature_on_moist_adiabat` with ``t_method`` = "newton" is used
 
+    method : str, optional
+        Specifies the computation method. The possible values are as follows:
+
+        * "normand": Normand's rule is used with ``ept_method`` and ``t_method`` (see below).
+        * "cosmo": a closed-form approximation of the wet bulb temperature is used.
+          ``ept_method`` and ``t_method`` are ignored.
+
     Returns
     -------
     FieldList|Field
@@ -1577,6 +1585,9 @@ def wet_bulb_temperature_from_dewpoint(
     * then the wet bulb potential temperature is determined as the temperature at
       pressure ``p`` on the moist adiabat with the given ``t_method``.
 
+    With ``method`` = "cosmo" the wet bulb temperature is computed from the temperature,
+    the dewpoint and the pressure with an empirical closed-form expression.
+
     """
     fieldlist_ufunc_kwargs = {"default_variable": "wet_bulb_temperature"}
     if p is None:
@@ -1589,6 +1600,7 @@ def wet_bulb_temperature_from_dewpoint(
         fieldlist_ufunc_kwargs=fieldlist_ufunc_kwargs,
         ept_method=ept_method,
         t_method=t_method,
+        method=method,
     )
 
 
@@ -1598,6 +1610,7 @@ def wet_bulb_temperature_from_specific_humidity(
     p: FieldList | Field | Iterable[float] | float | None = None,
     ept_method: str = "ifs",
     t_method: str = "bisect",
+    method: str = "normand",
 ) -> FieldList | Field:
     r"""Compute the pseudo adiabatic wet bulb temperature from specific humidity.
 
@@ -1625,6 +1638,14 @@ def wet_bulb_temperature_from_specific_humidity(
         * "bisect": :func:`temperature_on_moist_adiabat` with ``t_method`` = "bisect" is used
         * "newton": :func:`temperature_on_moist_adiabat` with ``t_method`` = "newton" is used
 
+    method : str, optional
+        Specifies the computation method. The possible values are as follows:
+
+        * "normand": Normand's rule is used with ``ept_method`` and ``t_method`` (see below).
+        * "cosmo": a closed-form approximation of the wet bulb temperature is used.
+          ``ept_method`` and ``t_method`` are ignored. Where the specific humidity is zero
+          the result is nan.
+
     Returns
     -------
     FieldList|Field
@@ -1639,6 +1660,11 @@ def wet_bulb_temperature_from_specific_humidity(
     * then the wet bulb potential temperature is determined as the temperature at
       pressure ``p`` on the moist adiabat with the given ``t_method``.
 
+    With ``method`` = "cosmo" the wet bulb temperature is computed from the temperature,
+    the dewpoint and the pressure with an empirical closed-form expression. For
+    ``wet_bulb_temperature_from_specific_humidity`` the dewpoint is first derived with
+    :func:`dewpoint_from_specific_humidity`.
+
     """
     fieldlist_ufunc_kwargs = {"default_variable": "wet_bulb_temperature"}
     if p is None:
@@ -1651,6 +1677,7 @@ def wet_bulb_temperature_from_specific_humidity(
         fieldlist_ufunc_kwargs=fieldlist_ufunc_kwargs,
         ept_method=ept_method,
         t_method=t_method,
+        method=method,
     )
 
 

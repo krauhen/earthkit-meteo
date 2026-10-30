@@ -2709,6 +2709,7 @@ def wet_bulb_temperature_from_dewpoint(
     p: "ArrayLike",
     ept_method: str = "ifs",
     t_method: str = "bisect",
+    method: str = "normand",
 ) -> "ArrayLike": ...
 
 
@@ -2719,6 +2720,7 @@ def wet_bulb_temperature_from_dewpoint(
     p: "xarray.DataArray",
     ept_method: str = "ifs",
     t_method: str = "bisect",
+    method: str = "normand",
 ) -> "xarray.DataArray": ...
 
 
@@ -2729,6 +2731,7 @@ def wet_bulb_temperature_from_dewpoint(
     p: "FieldList",
     ept_method: str = "ifs",
     t_method: str = "bisect",
+    method: str = "normand",
 ) -> "FieldList": ...
 
 
@@ -2739,6 +2742,7 @@ def wet_bulb_temperature_from_dewpoint(
     p: "Field",
     ept_method: str = "ifs",
     t_method: str = "bisect",
+    method: str = "normand",
 ) -> "Field": ...
 
 
@@ -2748,6 +2752,7 @@ def wet_bulb_temperature_from_dewpoint(
     p: "ArrayLike" | "xarray.DataArray" | "FieldList" | "Field",
     ept_method: str = "ifs",
     t_method: str = "bisect",
+    method: str = "normand",
 ) -> "ArrayLike" | "xarray.DataArray" | "FieldList" | "Field":
     r"""Compute the pseudo adiabatic wet bulb temperature from dewpoint.
 
@@ -2770,6 +2775,13 @@ def wet_bulb_temperature_from_dewpoint(
         * "bisect": :func:`temperature_on_moist_adiabat` with ``t_method`` = "bisect" is used
         * "newton": :func:`temperature_on_moist_adiabat` with ``t_method`` = "newton" is used
 
+    method: str, optional
+        Specifies the computation method. The possible values are as follows:
+
+        * "normand": Normand's rule is used with ``ept_method`` and ``t_method`` (see below).
+        * "cosmo": a closed-form approximation of the wet bulb temperature is used.
+          ``ept_method`` and ``t_method`` are ignored.
+
     Returns
     -------
     array-like | xarray.DataArray | FieldList | Field
@@ -2782,6 +2794,9 @@ def wet_bulb_temperature_from_dewpoint(
       ``ept_method`` (using :func:`ept_from_dewpoint`). This defines the moist adiabat.
     * then the wet bulb potential temperature is determined as the temperature at
       pressure ``p`` on the moist adiabat with the given ``t_method``.
+
+    With ``method`` = "cosmo" the wet bulb temperature is computed from the temperature,
+    the dewpoint and the pressure with an empirical closed-form expression.
 
 
     Implementations
@@ -2798,7 +2813,7 @@ def wet_bulb_temperature_from_dewpoint(
     The function returns an object of the same type as the input arguments.
     """
     dispatched = dispatch(wet_bulb_temperature_from_dewpoint, array=True)
-    return dispatched(t, td, p, ept_method=ept_method, t_method=t_method)
+    return dispatched(t, td, p, ept_method=ept_method, t_method=t_method, method=method)
 
 
 @overload
@@ -2808,6 +2823,7 @@ def wet_bulb_temperature_from_specific_humidity(
     p: "ArrayLike",
     ept_method: str = "ifs",
     t_method: str = "bisect",
+    method: str = "normand",
 ) -> "ArrayLike": ...
 
 
@@ -2818,6 +2834,7 @@ def wet_bulb_temperature_from_specific_humidity(
     p: "xarray.DataArray",
     ept_method: str = "ifs",
     t_method: str = "bisect",
+    method: str = "normand",
 ) -> "xarray.DataArray": ...
 
 
@@ -2828,6 +2845,7 @@ def wet_bulb_temperature_from_specific_humidity(
     p: "FieldList",
     ept_method: str = "ifs",
     t_method: str = "bisect",
+    method: str = "normand",
 ) -> "FieldList": ...
 
 
@@ -2838,6 +2856,7 @@ def wet_bulb_temperature_from_specific_humidity(
     p: "Field",
     ept_method: str = "ifs",
     t_method: str = "bisect",
+    method: str = "normand",
 ) -> "Field": ...
 
 
@@ -2847,6 +2866,7 @@ def wet_bulb_temperature_from_specific_humidity(
     p: "ArrayLike" | "xarray.DataArray" | "FieldList" | "Field",
     ept_method: str = "ifs",
     t_method: str = "bisect",
+    method: str = "normand",
 ) -> "ArrayLike" | "xarray.DataArray" | "FieldList" | "Field":
     r"""Compute the pseudo adiabatic wet bulb temperature from specific humidity.
 
@@ -2870,6 +2890,14 @@ def wet_bulb_temperature_from_specific_humidity(
         * "bisect": :func:`temperature_on_moist_adiabat` with ``t_method`` = "bisect" is used
         * "newton": :func:`temperature_on_moist_adiabat` with ``t_method`` = "newton" is used
 
+    method: str, optional
+        Specifies the computation method. The possible values are as follows:
+
+        * "normand": Normand's rule is used with ``ept_method`` and ``t_method`` (see below).
+        * "cosmo": a closed-form approximation of the wet bulb temperature is used.
+          ``ept_method`` and ``t_method`` are ignored. Where the specific humidity is zero
+          the result is nan.
+
     Returns
     -------
     array-like | xarray.DataArray | FieldList | Field
@@ -2882,6 +2910,11 @@ def wet_bulb_temperature_from_specific_humidity(
       ``ept_method`` (using :func:`ept_from_dewpoint`). This defines the moist adiabat.
     * then the wet bulb potential temperature is determined as the temperature at
       pressure ``p`` on the moist adiabat with the given ``t_method``.
+
+    With ``method`` = "cosmo" the wet bulb temperature is computed from the temperature,
+    the dewpoint and the pressure with an empirical closed-form expression. For
+    ``wet_bulb_temperature_from_specific_humidity`` the dewpoint is first derived with
+    :func:`dewpoint_from_specific_humidity`.
 
 
     Implementations
@@ -2898,7 +2931,7 @@ def wet_bulb_temperature_from_specific_humidity(
     The function returns an object of the same type as the input arguments.
     """
     dispatched = dispatch(wet_bulb_temperature_from_specific_humidity, array=True)
-    return dispatched(t, q, p, ept_method=ept_method, t_method=t_method)
+    return dispatched(t, q, p, ept_method=ept_method, t_method=t_method, method=method)
 
 
 @overload

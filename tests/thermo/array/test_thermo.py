@@ -1068,3 +1068,69 @@ def test_specific_gas_constant(q, v_ref, xp, device):
     q, v_ref = xp.asarray(q, device=device), xp.asarray(v_ref, device=device)
     r = thermo.array.specific_gas_constant(q)
     assert xp.allclose(r, v_ref)
+
+
+def _wet_bulb_cosmo_ref(t, td, p):
+    # independent evaluation of the closed-form expression (float64, numpy)
+    tl = (np.asarray(t, dtype=np.float64) - 273.15) * 10.0
+    tp = (np.asarray(td, dtype=np.float64) - 273.15) * 10.0
+    dt = tl - tp
+    zt = tp + 0.5 * dt * (0.6 - tp / 700.0)
+    return 273.15 + 0.1 * (tp + dt / (1.0 + 64000.0 * np.exp(11.564 * zt / (1742.0 + zt)) / p))
+
+
+_WB_T = [293.15, 283.15, 303.15, 268.15]
+_WB_TD = [283.15, 280.15, 295.15, 263.15]
+_WB_P = [100000.0, 95000.0, 101325.0, 85000.0]
+
+
+@pytest.mark.parametrize("xp, device", NAMESPACE_DEVICES)
+@pytest.mark.parametrize("dtype", ["float64", "float32"])
+def test_wet_bulb_temperature_cosmo_dewpoint(xp, device, dtype):
+    t, td, p = (xp.asarray(x, dtype=dtype, device=device) for x in (_WB_T, _WB_TD, _WB_P))
+    r = thermo.array.wet_bulb_temperature_from_dewpoint(t, td, p, method="cosmo")
+    assert r.dtype == t.dtype
+    ref = _wet_bulb_cosmo_ref(_WB_T, _WB_TD, _WB_P)
+    assert np.allclose(np.asarray(r, dtype=np.float64), ref, rtol=0, atol=1e-3 if dtype == "float32" else 1e-9)
+    # the result lies between the dewpoint and the temperature
+    assert np.all(np.asarray(r) <= np.asarray(t) + 1e-3)
+    assert np.all(np.asarray(r) >= np.asarray(td) - 1e-3)
+
+
+@pytest.mark.parametrize("xp, device", NAMESPACE_DEVICES)
+def test_wet_bulb_temperature_cosmo_specific_humidity(xp, device):
+    t, q, p = (xp.asarray(x, device=device) for x in (_WB_T, [0.008, 0.006, 0.012, 0.002], _WB_P))
+    td = thermo.array.dewpoint_from_specific_humidity(q, p)
+    r = thermo.array.wet_bulb_temperature_from_specific_humidity(t, q, p, method="cosmo")
+    ref = _wet_bulb_cosmo_ref(_WB_T, np.asarray(td), _WB_P)
+    assert np.allclose(np.asarray(r), ref, rtol=0, atol=1e-9)
+    # zero specific humidity gives nan
+    q0 = xp.asarray([0.0, 0.0, 0.0, 0.0], device=device)
+    r0 = thermo.array.wet_bulb_temperature_from_specific_humidity(t, q0, p, method="cosmo")
+    assert np.all(np.isnan(np.asarray(r0)))
+
+
+@pytest.mark.parametrize("xp, device", NAMESPACE_DEVICES)
+def test_wet_bulb_temperature_cosmo_saturated(xp, device):
+    t, p = xp.asarray([293.15, 273.15], device=device), xp.asarray([100000.0, 90000.0], device=device)
+    r = thermo.array.wet_bulb_temperature_from_dewpoint(t, t, p, method="cosmo")
+    assert np.allclose(np.asarray(r), np.asarray(t), atol=0.05)
+
+
+@pytest.mark.parametrize("xp, device", NAMESPACE_DEVICES)
+def test_wet_bulb_temperature_method_options(xp, device):
+    t, td, p = (xp.asarray(x, device=device) for x in (_WB_T, _WB_TD, _WB_P))
+    # the default is the existing behaviour
+    d = thermo.array.wet_bulb_temperature_from_dewpoint(t, td, p)
+    n = thermo.array.wet_bulb_temperature_from_dewpoint(t, td, p, method="normand")
+    np.testing.assert_array_equal(np.asarray(d), np.asarray(n))
+    # ept_method and t_method are ignored by "cosmo"
+    c1 = thermo.array.wet_bulb_temperature_from_dewpoint(t, td, p, method="cosmo")
+    c2 = thermo.array.wet_bulb_temperature_from_dewpoint(
+        t, td, p, ept_method="bolton39", t_method="newton", method="cosmo"
+    )
+    np.testing.assert_array_equal(np.asarray(c1), np.asarray(c2))
+    with pytest.raises(ValueError):
+        thermo.array.wet_bulb_temperature_from_dewpoint(t, td, p, method="foo")
+    with pytest.raises(ValueError):
+        thermo.array.wet_bulb_temperature_from_specific_humidity(t, td * 0 + 0.005, p, method="foo")

@@ -1575,12 +1575,34 @@ def temperature_on_moist_adiabat(
         raise ValueError(f"temperature_on_moist_adiabat: invalid t_method={t_method} specified!")
 
 
+# Coefficients of the closed-form wet bulb temperature approximation
+# (method="cosmo"). Temperatures enter in units of 0.1 degC, pressure in Pa.
+_WB_FIT_G = 0.5
+_WB_FIT_H = 0.6
+_WB_FIT_I = 700.0
+_WB_FIT_L = 0.1
+_WB_FIT_M = 64000.0
+_WB_FIT_N = 11.564
+_WB_FIT_O = 1742.0
+
+
+def _wet_bulb_temperature_cosmo(t, td, p):
+    xp = array_namespace(t, td, p)
+    t, td, p = xp.asarray(t), xp.asarray(td), xp.asarray(p)
+    tl = (t - constants.T_C2K) * 10.0
+    tp = (td - constants.T_C2K) * 10.0
+    dt = tl - tp
+    zt = tp + _WB_FIT_G * dt * (_WB_FIT_H - tp / _WB_FIT_I)
+    return constants.T_C2K + _WB_FIT_L * (tp + dt / (1.0 + _WB_FIT_M * xp.exp(_WB_FIT_N * zt / (_WB_FIT_O + zt)) / p))
+
+
 def wet_bulb_temperature_from_dewpoint(
     t: ArrayLike,
     td: ArrayLike,
     p: ArrayLike,
     ept_method: str = "ifs",
     t_method: str = "bisect",
+    method: str = "normand",
 ) -> ArrayLike:
     r"""Compute the pseudo adiabatic wet bulb temperature from dewpoint.
 
@@ -1603,6 +1625,13 @@ def wet_bulb_temperature_from_dewpoint(
         * "bisect": :func:`temperature_on_moist_adiabat` with ``t_method`` = "bisect" is used
         * "newton": :func:`temperature_on_moist_adiabat` with ``t_method`` = "newton" is used
 
+    method: str, optional
+        Specifies the computation method. The possible values are as follows:
+
+        * "normand": Normand's rule is used with ``ept_method`` and ``t_method`` (see below).
+        * "cosmo": a closed-form approximation of the wet bulb temperature is used.
+          ``ept_method`` and ``t_method`` are ignored.
+
     Returns
     -------
     number or array-like
@@ -1616,7 +1645,14 @@ def wet_bulb_temperature_from_dewpoint(
     * then the wet bulb potential temperature is determined as the temperature at
       pressure ``p`` on the moist adiabat with the given ``t_method``.
 
+    With ``method`` = "cosmo" the wet bulb temperature is computed from the temperature,
+    the dewpoint and the pressure with an empirical closed-form expression.
+
     """
+    if method == "cosmo":
+        return _wet_bulb_temperature_cosmo(t, td, p)
+    if method != "normand":
+        raise ValueError(f"Invalid method={method!r}. Possible values: 'normand', 'cosmo'")
     ept = ept_from_dewpoint(t, td, p, method=ept_method)
     return temperature_on_moist_adiabat(ept, p, ept_method=ept_method, t_method=t_method)
 
@@ -1627,6 +1663,7 @@ def wet_bulb_temperature_from_specific_humidity(
     p: ArrayLike,
     ept_method: str = "ifs",
     t_method: str = "bisect",
+    method: str = "normand",
 ) -> ArrayLike:
     r"""Compute the pseudo adiabatic wet bulb temperature from specific humidity.
 
@@ -1650,6 +1687,14 @@ def wet_bulb_temperature_from_specific_humidity(
         * "bisect": :func:`temperature_on_moist_adiabat` with ``t_method`` = "bisect" is used
         * "newton": :func:`temperature_on_moist_adiabat` with ``t_method`` = "newton" is used
 
+    method: str, optional
+        Specifies the computation method. The possible values are as follows:
+
+        * "normand": Normand's rule is used with ``ept_method`` and ``t_method`` (see below).
+        * "cosmo": a closed-form approximation of the wet bulb temperature is used.
+          ``ept_method`` and ``t_method`` are ignored. Where the specific humidity is zero
+          the result is nan.
+
     Returns
     -------
     number or array-like
@@ -1663,7 +1708,16 @@ def wet_bulb_temperature_from_specific_humidity(
     * then the wet bulb potential temperature is determined as the temperature at
       pressure ``p`` on the moist adiabat with the given ``t_method``.
 
+    With ``method`` = "cosmo" the wet bulb temperature is computed from the temperature,
+    the dewpoint and the pressure with an empirical closed-form expression. For
+    ``wet_bulb_temperature_from_specific_humidity`` the dewpoint is first derived with
+    :func:`dewpoint_from_specific_humidity`.
+
     """
+    if method == "cosmo":
+        return _wet_bulb_temperature_cosmo(t, dewpoint_from_specific_humidity(q, p), p)
+    if method != "normand":
+        raise ValueError(f"Invalid method={method!r}. Possible values: 'normand', 'cosmo'")
     ept = ept_from_specific_humidity(t, q, p, method=ept_method)
     return temperature_on_moist_adiabat(ept, p, ept_method=ept_method, t_method=t_method)
 

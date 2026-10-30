@@ -635,3 +635,19 @@ def test_xr_specific_gas_constant(q):
     ref = thermo.array.specific_gas_constant(_np(q))
     assert np.allclose(out.values, ref, equal_nan=True)
     assert out.ndim == 0
+
+
+@pytest.mark.parametrize("fn", ["dewpoint", "specific_humidity"])
+def test_xr_wet_bulb_temperature_cosmo(fn):
+    import xarray as xr
+
+    t = xr.DataArray(np.array([293.15, 283.15, 303.15]), dims="x")
+    x = xr.DataArray(
+        np.array([283.15, 280.15, 295.15]) if fn == "dewpoint" else np.array([0.008, 0.006, 0.012]), dims="x"
+    )
+    p = xr.DataArray(np.array([100000.0, 95000.0, 101325.0]), dims="x")
+    name = f"wet_bulb_temperature_from_{fn}"
+    out = getattr(thermo, name)(t, x, p, method="cosmo")
+    ref = getattr(thermo.array, name)(t.values, x.values, p.values, method="cosmo")
+    assert isinstance(out, xr.DataArray)
+    np.testing.assert_allclose(out.values, ref)
