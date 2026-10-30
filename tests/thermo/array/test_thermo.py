@@ -1068,3 +1068,221 @@ def test_specific_gas_constant(q, v_ref, xp, device):
     q, v_ref = xp.asarray(q, device=device), xp.asarray(v_ref, device=device)
     r = thermo.array.specific_gas_constant(q)
     assert xp.allclose(r, v_ref)
+
+
+_RI_Z = [3000.0, 2000.0, 1000.0, 500.0, 100.0]
+
+
+@pytest.fixture(params=["array", "top"])
+def mod(request):
+    return thermo.array if request.param == "array" else thermo
+
+
+@pytest.mark.parametrize("xp, device", NAMESPACE_DEVICES)
+def test_bulk_richardson_number_neutral(mod, xp, device):
+    # constant theta_v: zero everywhere even with strong shear
+    theta_v = xp.full((5, 2), 300.0, device=device)
+    z = xp.asarray([[h, h] for h in _RI_Z], device=device)
+    u = xp.asarray([[20.0, 5.0], [15.0, 4.0], [10.0, 3.0], [5.0, 2.0], [1.0, 1.0]], device=device)
+    v = xp.zeros_like(u)
+
+    r = mod.bulk_richardson_number(theta_v, z, u, v)
+    assert r.shape == (5, 2)
+    assert xp.all(r == 0.0)
+
+
+@pytest.mark.parametrize("xp, device", NAMESPACE_DEVICES)
+def test_bulk_richardson_number_stable(mod, xp, device):
+    theta_v = xp.asarray([310.0, 306.0, 303.0, 301.0, 300.0], device=device)
+    z = xp.asarray(_RI_Z, device=device)
+    u = xp.asarray([10.0, 8.0, 6.0, 4.0, 2.0], device=device)
+    v = xp.asarray([0.0, 6.0, 0.0, 3.0, 0.0], device=device)
+
+    r = mod.bulk_richardson_number(theta_v, z, u, v, z_sfc=50.0)
+    mean = (306.0 + 303.0 + 301.0 + 300.0) / 4.0
+    expected = constants.g * (2000.0 - 50.0) * 6.0 / (mean * 100.0)
+    assert xp.all(r[:-1] > 0.0)
+    assert r[-1] == 0.0
+    assert abs(float(r[1]) - expected) < 1e-12
+
+
+@pytest.mark.parametrize("xp, device", NAMESPACE_DEVICES)
+def test_bulk_richardson_number_vmin(mod, xp, device):
+    # calm wind on level 0: the speed is floored at vmin; levels on the last axis
+    theta_v = xp.asarray([[301.0, 300.0]], device=device)
+    z = xp.asarray([[1000.0, 0.0]], device=device)
+    u = xp.zeros_like(theta_v)
+
+    r = mod.bulk_richardson_number(theta_v, z, u, u, vertical_dim=1, vmin=0.5)
+    expected = constants.g * 1000.0 * 1.0 / (300.5 * 0.25)
+    assert r.shape == (1, 2)
+    assert abs(float(r[0, 0]) - expected) < 1e-9
+
+
+@pytest.mark.parametrize("xp, device", NAMESPACE_DEVICES)
+def test_bulk_richardson_number_single_level(mod, xp, device):
+    r = mod.bulk_richardson_number(
+        xp.asarray([300.0], device=device),
+        xp.asarray([100.0], device=device),
+        xp.asarray([3.0], device=device),
+        xp.asarray([4.0], device=device),
+    )
+    assert r.shape == (1,)
+    assert float(r[0]) == 0.0
+
+
+@pytest.mark.parametrize("xp, device", NAMESPACE_DEVICES)
+def test_bulk_richardson_number_vertical_dim(mod, xp, device):
+    theta_v = xp.asarray([[310.0, 312.0], [305.0, 306.0], [300.0, 301.0]], device=device)
+    z = xp.asarray([[2000.0, 2100.0], [1000.0, 1100.0], [100.0, 150.0]], device=device)
+    u = xp.asarray([[5.0, 6.0], [3.0, 4.0], [1.0, 2.0]], device=device)
+    v = xp.zeros_like(u)
+
+    r0 = mod.bulk_richardson_number(theta_v, z, u, v)
+    r1 = mod.bulk_richardson_number(theta_v.T, z.T, u.T, v.T, vertical_dim=1)
+    assert r1.shape == (2, 3)
+    assert xp.allclose(r1.T, r0)
+
+
+@pytest.mark.parametrize("xp, device", NAMESPACE_DEVICES)
+def test_bulk_richardson_number_z_sfc_array(mod, xp, device):
+    theta_v = xp.asarray([[310.0, 310.0], [300.0, 300.0]], device=device)
+    z = xp.asarray([[1000.0, 1000.0], [100.0, 100.0]], device=device)
+    u = xp.asarray([[5.0, 5.0], [1.0, 1.0]], device=device)
+    v = xp.zeros_like(u)
+
+    r = mod.bulk_richardson_number(theta_v, z, u, v, z_sfc=xp.asarray([0.0, 500.0], device=device))
+    assert abs(float(r[0, 1]) / float(r[0, 0]) - 0.5) < 1e-12
+
+
+@pytest.mark.parametrize("xp, device", NAMESPACE_DEVICES)
+def test_bulk_richardson_number_nan(mod, xp, device):
+    nan = float("nan")
+    z = xp.asarray([2000.0, 1000.0, 100.0], device=device)
+    u = xp.asarray([5.0, 3.0, 1.0], device=device)
+    v = xp.zeros_like(u)
+
+    # nan in the middle: it is in the mean of the levels above and on its own level
+    r = mod.bulk_richardson_number(xp.asarray([310.0, nan, 300.0], device=device), z, u, v)
+    assert xp.isnan(r[0]) and xp.isnan(r[1]) and r[2] == 0.0
+
+    # nan on the lowest level: all levels are nan
+    r = mod.bulk_richardson_number(xp.asarray([310.0, 305.0, nan], device=device), z, u, v)
+    assert xp.all(xp.isnan(r))
+
+    # nan wind: only its own level
+    r = mod.bulk_richardson_number(
+        xp.asarray([310.0, 305.0, 300.0], device=device),
+        z,
+        xp.asarray([nan, 3.0, 1.0], device=device),
+        v,
+    )
+    assert xp.isnan(r[0]) and not xp.isnan(r[1]) and r[2] == 0.0
+
+
+@pytest.mark.parametrize("xp, device", NAMESPACE_DEVICES)
+def test_bulk_richardson_number_float32(mod, xp, device):
+    theta_v = xp.asarray([310.0, 305.0, 300.0], dtype=xp.float32, device=device)
+    z = xp.asarray([2000.0, 1000.0, 100.0], dtype=xp.float32, device=device)
+    u = xp.asarray([5.0, 3.0, 1.0], dtype=xp.float32, device=device)
+
+    r = mod.bulk_richardson_number(theta_v, z, u, xp.zeros_like(u))
+    assert r.dtype == xp.float32
+
+
+def _pbl_column(xp, device, dtype=None):
+    # stable column, ordered from the top down
+    theta_v = xp.asarray([310.0, 303.0, 300.5, 300.0], dtype=dtype, device=device)
+    z = xp.asarray([3000.0, 2000.0, 1000.0, 100.0], dtype=dtype, device=device)
+    u = xp.asarray([10.0, 10.0, 10.0, 10.0], dtype=dtype, device=device)
+    return theta_v, z, u, xp.zeros_like(u)
+
+
+@pytest.mark.parametrize("xp, device", NAMESPACE_DEVICES)
+def test_pbl_height_bulk_richardson_interpolation(mod, xp, device):
+    theta_v, z, u, v = _pbl_column(xp, device)
+    z_sfc = 50.0
+    ri = mod.bulk_richardson_number(theta_v, z, u, v, z_sfc=z_sfc)
+    assert float(ri[2]) < 0.22 < float(ri[1])
+
+    h = mod.pbl_height_bulk_richardson(theta_v, z, u, v, z_sfc=z_sfc)
+    h_k, h_b = 2000.0 - z_sfc, 1000.0 - z_sfc
+    expected = h_b + (0.22 - float(ri[2])) / (float(ri[1]) - float(ri[2])) * (h_k - h_b)
+    assert h.shape == ()
+    assert h_b < float(h) < h_k
+    assert abs(float(h) - expected) < 1e-9
+
+    # the critical value is reproduced exactly at a level
+    h = mod.pbl_height_bulk_richardson(theta_v, z, u, v, z_sfc=z_sfc, ri_crit=float(ri[1]) - 1e-12)
+    assert abs(float(h) - h_k) < 1e-6
+
+
+@pytest.mark.parametrize("xp, device", NAMESPACE_DEVICES)
+def test_pbl_height_bulk_richardson_no_crossing(mod, xp, device):
+    theta_v = xp.asarray([[300.0, 310.0], [300.0, 305.0], [300.0, 300.0]], device=device)
+    z = xp.asarray([[2000.0, 2000.0], [1000.0, 1000.0], [100.0, 100.0]], device=device)
+    u = xp.full(theta_v.shape, 5.0, device=device)
+
+    h = mod.pbl_height_bulk_richardson(theta_v, z, u, xp.zeros_like(u))
+    assert h.shape == (2,)
+    assert xp.isnan(h[0])  # neutral column
+    assert not xp.isnan(h[1])  # stable column in the same call
+    assert 0.0 < float(h[1]) < 1900.0
+
+    # single level: no crossing
+    h = mod.pbl_height_bulk_richardson(
+        xp.asarray([300.0], device=device),
+        xp.asarray([100.0], device=device),
+        xp.asarray([3.0], device=device),
+        xp.asarray([4.0], device=device),
+    )
+    assert xp.isnan(h)
+
+
+@pytest.mark.parametrize("xp, device", NAMESPACE_DEVICES)
+def test_pbl_height_bulk_richardson_vertical_dim_z_sfc(mod, xp, device):
+    theta_v, z, u, v = _pbl_column(xp, device)
+    theta_v, z, u, v = (xp.stack([a, a], axis=0) for a in (theta_v, z, u, v))  # [2, 4]
+    z_sfc = xp.asarray([50.0, 150.0], device=device)
+
+    h = mod.pbl_height_bulk_richardson(theta_v, z, u, v, z_sfc=z_sfc, vertical_dim=1)
+    assert h.shape == (2,)
+    ref0 = mod.pbl_height_bulk_richardson(theta_v[0], z[0], u[0], v[0], z_sfc=50.0)
+    ref1 = mod.pbl_height_bulk_richardson(theta_v[1], z[1], u[1], v[1], z_sfc=150.0)
+    assert abs(float(h[0]) - float(ref0)) < 1e-9
+    assert abs(float(h[1]) - float(ref1)) < 1e-9
+
+
+@pytest.mark.parametrize("xp, device", NAMESPACE_DEVICES)
+def test_pbl_height_bulk_richardson_nan(mod, xp, device):
+    nan = float("nan")
+    theta_v, z, u, v = _pbl_column(xp, device)
+
+    # nan potential temperature on the lowest level: nan everywhere
+    t = xp.asarray([310.0, 306.0, 301.0, nan], device=device)
+    assert xp.isnan(mod.pbl_height_bulk_richardson(t, z, u, v))
+
+    # nan wind on the level below the crossing level
+    u_nan = xp.asarray([10.0, 10.0, nan, 10.0], device=device)
+    assert xp.isnan(mod.pbl_height_bulk_richardson(theta_v, z, u_nan, v))
+
+    # nan wind above the crossing level does not matter
+    u_top = xp.asarray([nan, 10.0, 10.0, 10.0], device=device)
+    h = mod.pbl_height_bulk_richardson(theta_v, z, u_top, v)
+    assert not xp.isnan(h)
+
+
+@pytest.mark.parametrize("xp, device", NAMESPACE_DEVICES)
+def test_pbl_height_bulk_richardson_float32(mod, xp, device):
+    theta_v, z, u, v = _pbl_column(xp, device, dtype=xp.float32)
+    h = mod.pbl_height_bulk_richardson(theta_v, z, u, v, z_sfc=50.0)
+    assert h.dtype == xp.float32
+    h64 = mod.pbl_height_bulk_richardson(*(xp.astype(a, xp.float64) for a in (theta_v, z, u, v)), z_sfc=50.0)
+    assert abs(float(h) - float(h64)) < 1e-2
+
+
+@pytest.mark.parametrize("ri_crit", [0.0, -1.0, float("nan")])
+def test_pbl_height_bulk_richardson_ri_crit(mod, ri_crit):
+    a = np.asarray([310.0, 300.0])
+    with pytest.raises(ValueError):
+        mod.pbl_height_bulk_richardson(a, a, a, a, ri_crit=ri_crit)

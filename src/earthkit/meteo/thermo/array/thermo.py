@@ -15,6 +15,7 @@ from earthkit.utils.array import array_namespace
 
 from earthkit.meteo import constants
 from earthkit.meteo.utils.convert import celsius_to_kelvin
+from earthkit.meteo.vertical.array.vertical import _levels_first
 
 # import numpy as np
 
@@ -1795,3 +1796,179 @@ def specific_gas_constant(q: ArrayLike) -> ArrayLike:
     """
     R = constants.Rd + (constants.Rv - constants.Rd) * q
     return R
+
+
+def bulk_richardson_number(
+    theta_v: ArrayLike,
+    z: ArrayLike,
+    u: ArrayLike,
+    v: ArrayLike,
+    z_sfc: ArrayLike = 0.0,
+    vertical_dim: int = 0,
+    vmin: float = 1.0e-3,
+) -> ArrayLike:
+    r"""Compute the bulk Richardson number on each level relative to the lowest level.
+
+    *New in version 1.4.0*
+
+    Parameters
+    ----------
+    theta_v: array-like
+        Virtual potential temperature on levels (K)
+    z: array-like
+        Height of the levels above sea level (m)
+    u: array-like
+        Eastward wind component on levels (m/s)
+    v: array-like
+        Northward wind component on levels (m/s)
+    z_sfc: array-like, optional
+        Surface height above sea level (m), shaped like one level (default: 0)
+    vertical_dim: int, optional
+        Vertical axis of ``theta_v``, ``z``, ``u`` and ``v`` (default: 0)
+    vmin: float, optional
+        Lower bound of the wind speed (m/s) in the denominator (default: 1e-3)
+
+    Returns
+    -------
+    array-like
+        Bulk Richardson number (dimensionless) on each level, with the same
+        floating point type as ``theta_v``.
+
+
+    The levels must be ordered from the top down: the last level along ``vertical_dim``
+    is the lowest one, :math:`n`. The computation is based on the following formula
+    for the surface-relative bulk Richardson number [Stull1988]_:
+
+    .. math::
+
+        Ri_{b,k} = \frac{g \, (z_k - z_{sfc}) \, (\theta_{v,k} - \theta_{v,n})}
+        {\overline{\theta_v}_k \, \max(u_k^2 + v_k^2, v_{min}^2)}
+
+    where:
+
+        * :math:`g` is the gravitational acceleration (see :data:`earthkit.meteo.constants.g`)
+        * :math:`\overline{\theta_v}_k` is the unweighted mean of :math:`\theta_v` over the
+          levels :math:`k` to :math:`n` (not weighted by layer thickness)
+        * the wind speed is taken relative to the surface, where the wind is assumed to
+          be zero, so the wind of the lowest level is not subtracted
+        * the height difference is :math:`z_k - z_{sfc}`, not :math:`z_k - z_n`
+
+    The value on the lowest level is 0. A nan in ``u`` or ``v`` makes only the same level nan.
+    A nan in ``theta_v`` on level :math:`j` makes all levels :math:`k \le j` nan, because
+    it enters the mean over the levels :math:`k` to :math:`n`; a nan on the lowest level
+    makes all levels nan.
+    """
+    xp = array_namespace(theta_v, z, u, v)
+    theta_v = _levels_first(xp, xp.asarray(theta_v), vertical_dim)
+    z = _levels_first(xp, xp.asarray(z), vertical_dim)
+    u = _levels_first(xp, xp.asarray(u), vertical_dim)
+    v = _levels_first(xp, xp.asarray(v), vertical_dim)
+    z_sfc = xp.asarray(z_sfc, dtype=theta_v.dtype)
+
+    nlev = theta_v.shape[0]
+    total = xp.flip(xp.cumulative_sum(xp.flip(theta_v, axis=0), axis=0), axis=0)
+    count = xp.arange(nlev, 0, -1, dtype=theta_v.dtype)
+    count = xp.reshape(count, (nlev,) + (1,) * (theta_v.ndim - 1))
+    mean = total / count
+
+    speed2 = xp.maximum(u**2 + v**2, xp.asarray(vmin**2, dtype=theta_v.dtype))
+    ri = constants.g * (z - z_sfc) * (theta_v - theta_v[-1, ...]) / (mean * speed2)
+    return ri if vertical_dim == 0 else xp.moveaxis(ri, 0, vertical_dim)
+
+
+def pbl_height_bulk_richardson(
+    theta_v: ArrayLike,
+    z: ArrayLike,
+    u: ArrayLike,
+    v: ArrayLike,
+    z_sfc: ArrayLike = 0.0,
+    ri_crit: float = 0.22,
+    vertical_dim: int = 0,
+    vmin: float = 1.0e-3,
+) -> ArrayLike:
+    r"""Compute the boundary layer height from the bulk Richardson number.
+
+    *New in version 1.4.0*
+
+    Parameters
+    ----------
+    theta_v: array-like
+        Virtual potential temperature on levels (K)
+    z: array-like
+        Height of the levels above sea level (m)
+    u: array-like
+        Eastward wind component on levels (m/s)
+    v: array-like
+        Northward wind component on levels (m/s)
+    z_sfc: array-like, optional
+        Surface height above sea level (m), shaped like one level (default: 0)
+    ri_crit: float, optional
+        Critical bulk Richardson number, must be positive (default: 0.22).
+        The critical value is empirical and depends on the formulation and the
+        vertical resolution, see [Vogelezang1996]_.
+    vertical_dim: int, optional
+        Vertical axis of ``theta_v``, ``z``, ``u`` and ``v`` (default: 0)
+    vmin: float, optional
+        Lower bound of the wind speed (m/s) in the denominator of the bulk Richardson
+        number (default: 1e-3)
+
+    Returns
+    -------
+    array-like
+        Boundary layer height above ground (m), without the vertical axis, with the same
+        floating point type as ``theta_v``. It is nan where the bulk Richardson number
+        does not exceed ``ri_crit`` on any level.
+
+    Raises
+    ------
+    ValueError
+        If ``ri_crit`` is not positive.
+
+
+    The levels must be ordered from the top down: the last level along ``vertical_dim``
+    is the lowest one. The bulk Richardson number :math:`Ri_b` is computed with
+    :func:`bulk_richardson_number` [Stull1988]_ and the column is searched upwards from
+    the lowest level, where :math:`Ri_b = 0`, for the first level :math:`k` with
+    :math:`Ri_{b,k} > Ri_{crit}`. The height is interpolated linearly in :math:`Ri_b`
+    between this level and the level :math:`k+1` below it [Vogelezang1996]_:
+
+    .. math::
+
+        h = h_{k+1} + \frac{Ri_{crit} - Ri_{b,k+1}}{Ri_{b,k} - Ri_{b,k+1}} \, (h_k - h_{k+1})
+
+    where :math:`h_k = z_k - z_{sfc}` is the height above ground.
+
+    A nan in the inputs propagates as described in :func:`bulk_richardson_number`. A level
+    with a nan :math:`Ri_b` never exceeds ``ri_crit``; the result is nan if such a level
+    is the level :math:`k+1` directly below the first exceeding level, or if it makes the
+    search find no level at all.
+    """
+    if not ri_crit > 0:
+        raise ValueError(f"ri_crit must be positive, got {ri_crit}")
+
+    xp = array_namespace(theta_v, z, u, v)
+    theta_v = _levels_first(xp, xp.asarray(theta_v), vertical_dim)
+    z = _levels_first(xp, xp.asarray(z), vertical_dim)
+    u = _levels_first(xp, xp.asarray(u), vertical_dim)
+    v = _levels_first(xp, xp.asarray(v), vertical_dim)
+    z_sfc = xp.asarray(z_sfc, dtype=theta_v.dtype)
+
+    ri = bulk_richardson_number(theta_v, z, u, v, z_sfc=z_sfc, vmin=vmin)
+    h = z - z_sfc
+    crit = xp.asarray(ri_crit, dtype=ri.dtype)
+
+    nlev = ri.shape[0]
+    exceed = ri > crit
+    found = xp.any(exceed, axis=0)
+    # first exceeding level counted from the lowest one
+    k = nlev - 1 - xp.argmax(xp.astype(xp.flip(exceed, axis=0), xp.int8), axis=0)
+    kb = xp.minimum(k + 1, nlev - 1)
+
+    def _at(a, idx):
+        return xp.take_along_axis(a, idx[xp.newaxis, ...], axis=0)[0]
+
+    ri_k, ri_b, h_k, h_b = _at(ri, k), _at(ri, kb), _at(h, k), _at(h, kb)
+    den = xp.where(found, ri_k - ri_b, xp.ones_like(ri_k))
+    out = h_b + (crit - ri_b) / den * (h_k - h_b)
+    out = xp.where(found, out, xp.asarray(xp.nan, dtype=out.dtype))
+    return xp.astype(out, theta_v.dtype)

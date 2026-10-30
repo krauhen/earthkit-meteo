@@ -3159,3 +3159,178 @@ def specific_gas_constant(
     """
     dispatched = dispatch(specific_gas_constant, array=True)
     return dispatched(q)
+
+
+@overload
+def bulk_richardson_number(
+    theta_v: "ArrayLike",
+    z: "ArrayLike",
+    u: "ArrayLike",
+    v: "ArrayLike",
+    z_sfc: "ArrayLike" = 0.0,
+    vertical_dim: int = 0,
+    vmin: float = 1.0e-3,
+) -> "ArrayLike": ...
+
+
+@overload
+def bulk_richardson_number(
+    theta_v: "xarray.DataArray",
+    z: "xarray.DataArray",
+    u: "xarray.DataArray",
+    v: "xarray.DataArray",
+    z_sfc: "xarray.DataArray | float" = 0.0,
+    vertical_dim: str = "z",
+    vmin: float = 1.0e-3,
+) -> "xarray.DataArray": ...
+
+
+def bulk_richardson_number(
+    theta_v: "ArrayLike | xarray.DataArray",
+    z: "ArrayLike | xarray.DataArray",
+    u: "ArrayLike | xarray.DataArray",
+    v: "ArrayLike | xarray.DataArray",
+    z_sfc: "ArrayLike | xarray.DataArray | float" = 0.0,
+    vertical_dim: "int | str | None" = None,
+    vmin: float = 1.0e-3,
+) -> "ArrayLike | xarray.DataArray":
+    r"""Compute the bulk Richardson number on each level relative to the lowest level.
+
+    *New in version 1.4.0*
+
+    Parameters
+    ----------
+    theta_v: array-like | xarray.DataArray
+        Virtual potential temperature on levels (K)
+    z: array-like | xarray.DataArray
+        Height of the levels above sea level (m)
+    u: array-like | xarray.DataArray
+        Eastward wind component on levels (m/s)
+    v: array-like | xarray.DataArray
+        Northward wind component on levels (m/s)
+    z_sfc: array-like | xarray.DataArray | float, optional
+        Surface height above sea level (m), without the vertical axis (default: 0)
+    vertical_dim: int | str, optional
+        Vertical axis: an int for array-like input (default 0), the name of the
+        vertical dimension for xarray input (default ``"z"``). Levels are ordered
+        from the top down.
+    vmin: float, optional
+        Lower bound of the wind speed (m/s) in the denominator (default: 1e-3)
+
+    Returns
+    -------
+    array-like | xarray.DataArray
+        Bulk Richardson number (dimensionless) on each level
+
+    See Also
+    --------
+    earthkit.meteo.thermo.array.bulk_richardson_number
+
+
+    Implementations
+    ------------------------
+    :func:`bulk_richardson_number` calls one of the following implementations depending on
+    the type of the input arguments:
+
+    - :py:meth:`earthkit.meteo.thermo.array.bulk_richardson_number` for array-like
+    - :py:meth:`earthkit.meteo.thermo.xarray.bulk_richardson_number`
+      for xarray.DataArray
+
+    The function returns an object of the same type as the ``theta_v`` argument.
+    """
+    kwargs = {} if vertical_dim is None else {"vertical_dim": vertical_dim}
+    return dispatch(bulk_richardson_number, xarray=True, fieldlist=False, array=True)(
+        theta_v, z, u, v, z_sfc=z_sfc, vmin=vmin, **kwargs
+    )
+
+
+@overload
+def pbl_height_bulk_richardson(
+    theta_v: "ArrayLike",
+    z: "ArrayLike",
+    u: "ArrayLike",
+    v: "ArrayLike",
+    z_sfc: "ArrayLike" = 0.0,
+    ri_crit: float = 0.22,
+    vertical_dim: int = 0,
+    vmin: float = 1.0e-3,
+) -> "ArrayLike": ...
+
+
+@overload
+def pbl_height_bulk_richardson(
+    theta_v: "xarray.DataArray",
+    z: "xarray.DataArray",
+    u: "xarray.DataArray",
+    v: "xarray.DataArray",
+    z_sfc: "xarray.DataArray | float" = 0.0,
+    ri_crit: float = 0.22,
+    vertical_dim: str = "z",
+    vmin: float = 1.0e-3,
+) -> "xarray.DataArray": ...
+
+
+def pbl_height_bulk_richardson(
+    theta_v: "ArrayLike | xarray.DataArray",
+    z: "ArrayLike | xarray.DataArray",
+    u: "ArrayLike | xarray.DataArray",
+    v: "ArrayLike | xarray.DataArray",
+    z_sfc: "ArrayLike | xarray.DataArray | float" = 0.0,
+    ri_crit: float = 0.22,
+    vertical_dim: "int | str | None" = None,
+    vmin: float = 1.0e-3,
+) -> "ArrayLike | xarray.DataArray":
+    r"""Compute the boundary layer height from the bulk Richardson number.
+
+    *New in version 1.4.0*
+
+    Parameters
+    ----------
+    theta_v: array-like | xarray.DataArray
+        Virtual potential temperature on levels (K)
+    z: array-like | xarray.DataArray
+        Height of the levels above sea level (m)
+    u: array-like | xarray.DataArray
+        Eastward wind component on levels (m/s)
+    v: array-like | xarray.DataArray
+        Northward wind component on levels (m/s)
+    z_sfc: array-like | xarray.DataArray | float, optional
+        Surface height above sea level (m), without the vertical axis (default: 0)
+    ri_crit: float, optional
+        Critical bulk Richardson number, must be positive (default: 0.22).
+        This is a typical value; the literature uses values from about 0.2 to 0.5.
+    vertical_dim: int | str, optional
+        Vertical axis: an int for array-like input (default 0), the name of the
+        vertical dimension for xarray input (default ``"z"``). Levels are ordered
+        from the top down.
+    vmin: float, optional
+        Lower bound of the wind speed (m/s) in the denominator of the bulk Richardson
+        number (default: 1e-3)
+
+    Returns
+    -------
+    array-like | xarray.DataArray
+        Boundary layer height above ground (m), without the vertical axis. It is nan where
+        the bulk Richardson number does not exceed ``ri_crit`` on any level.
+
+    See Also
+    --------
+    earthkit.meteo.thermo.array.pbl_height_bulk_richardson
+    bulk_richardson_number
+
+
+    Implementations
+    ------------------------
+    :func:`pbl_height_bulk_richardson` calls one of the following implementations depending on
+    the type of the input arguments:
+
+    - :py:meth:`earthkit.meteo.thermo.array.pbl_height_bulk_richardson` for array-like
+    - :py:meth:`earthkit.meteo.thermo.xarray.pbl_height_bulk_richardson`
+      for xarray.DataArray
+
+    The function returns an object of the same type as the ``theta_v`` argument.
+    """
+    kwargs = {} if vertical_dim is None else {"vertical_dim": vertical_dim}
+    return dispatch(pbl_height_bulk_richardson, xarray=True, fieldlist=False, array=True)(
+        theta_v, z, u, v, z_sfc=z_sfc, ri_crit=ri_crit, vmin=vmin, **kwargs
+    )

@@ -635,3 +635,69 @@ def test_xr_specific_gas_constant(q):
     ref = thermo.array.specific_gas_constant(_np(q))
     assert np.allclose(out.values, ref, equal_nan=True)
     assert out.ndim == 0
+
+
+def _ri_inputs():
+    import xarray as xr
+
+    dims = ("z", "x")
+    theta_v = xr.DataArray([[310.0, 312.0], [305.0, 306.0], [300.0, 301.0]], dims=dims)
+    z = xr.DataArray([[2000.0, 2100.0], [1000.0, 1100.0], [100.0, 150.0]], dims=dims)
+    u = xr.DataArray([[5.0, 6.0], [3.0, 4.0], [1.0, 2.0]], dims=dims)
+    return theta_v, z, u, xr.zeros_like(u)
+
+
+def test_xr_bulk_richardson_number():
+    import xarray as xr
+
+    theta_v, z, u, v = _ri_inputs()
+    z_sfc = xr.DataArray([0.0, 50.0], dims=("x",))
+    out = thermo.bulk_richardson_number(theta_v, z, u, v, z_sfc=z_sfc)
+    ref = thermo.array.bulk_richardson_number(_np(theta_v), _np(z), _np(u), _np(v), z_sfc=np.array([0.0, 50.0]))
+    assert isinstance(out, xr.DataArray)
+    assert out.dims == ("z", "x")
+    assert np.allclose(out.values, ref)
+
+
+def test_xr_bulk_richardson_number_vertical_dim():
+    theta_v, z, u, v = _ri_inputs()
+    out = thermo.bulk_richardson_number(
+        theta_v.transpose("x", "z"),
+        z.transpose("x", "z"),
+        u.transpose("x", "z"),
+        v.transpose("x", "z"),
+    )
+    ref = thermo.bulk_richardson_number(theta_v, z, u, v)
+    assert out.dims == ("x", "z")
+    assert np.allclose(out.transpose("z", "x").values, ref.values)
+
+
+def test_xr_pbl_height_bulk_richardson():
+    import xarray as xr
+
+    theta_v, z, u, v = _ri_inputs()
+    z_sfc = xr.DataArray([0.0, 50.0], dims=("x",))
+    out = thermo.pbl_height_bulk_richardson(theta_v, z, u, v, z_sfc=z_sfc, ri_crit=0.1)
+    ref = thermo.array.pbl_height_bulk_richardson(
+        _np(theta_v), _np(z), _np(u), _np(v), z_sfc=np.array([0.0, 50.0]), ri_crit=0.1
+    )
+    assert isinstance(out, xr.DataArray)
+    assert out.dims == ("x",)
+    assert out.attrs["units"] == "m"
+    assert not np.isnan(ref).any()
+    assert np.allclose(out.values, ref)
+
+
+def test_xr_pbl_height_bulk_richardson_vertical_dim():
+    theta_v, z, u, v = _ri_inputs()
+    kw = {"ri_crit": 0.1}
+    out = thermo.pbl_height_bulk_richardson(
+        theta_v.transpose("x", "z"),
+        z.transpose("x", "z"),
+        u.transpose("x", "z"),
+        v.transpose("x", "z"),
+        **kw,
+    )
+    ref = thermo.pbl_height_bulk_richardson(theta_v, z, u, v, **kw)
+    assert out.dims == ("x",)
+    assert np.allclose(out.values, ref.values)

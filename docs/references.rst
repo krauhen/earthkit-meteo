@@ -66,6 +66,16 @@ IFS Documentation CY49R1 - Part III: Dynamics and numerical procedures, (2024). 
 Stipanuk, G. S., (1973). Algorithms for Generating a Skew-T, Log P Diagram and Computing Selected Meteorological Quantities. Atmospheric Sciences Laboratory, U.S. Army Electronics Command. White Sands Missile Range, New Mexico 88002.
 
 
+.. [Stull1988]
+
+Stull, R. B., (1988). An Introduction to Boundary Layer Meteorology. Kluwer Academic Publishers, 666 pp.
+
+
+.. [Vogelezang1996]
+
+Vogelezang, D. H. P. and A. A. M. Holtslag, (1996). Evaluation and model impacts of alternative boundary-layer height formulations. Boundary-Layer Meteorology, 81, 245-269.
+
+
 .. [Wallace2006]
 
 Wallace, J. M and P. V. Hobbs, P. V., (2006). Atmospheric Science: An Introductory Survey. 2nd ed. Academic Press, 504 pp.

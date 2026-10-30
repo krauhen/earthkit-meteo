@@ -1520,3 +1520,105 @@ def specific_gas_constant(q: xr.DataArray) -> xr.DataArray:
         "units": "J kg-1 K-1",
         "long_name": "Specific gas constant of moist air",
     })
+
+
+def bulk_richardson_number(
+    theta_v: xr.DataArray,
+    z: xr.DataArray,
+    u: xr.DataArray,
+    v: xr.DataArray,
+    z_sfc: xr.DataArray | float = 0.0,
+    vertical_dim: str = "z",
+    vmin: float = 1.0e-3,
+) -> xr.DataArray:
+    r"""Compute the bulk Richardson number on each level relative to the lowest level.
+
+    Parameters
+    ----------
+    theta_v : xarray.DataArray
+        Virtual potential temperature on levels (K)
+    z : xarray.DataArray
+        Height of the levels above sea level (m)
+    u : xarray.DataArray
+        Eastward wind component on levels (m/s)
+    v : xarray.DataArray
+        Northward wind component on levels (m/s)
+    z_sfc : xarray.DataArray or float, optional
+        Surface height above sea level (m), without the vertical dimension (default: 0)
+    vertical_dim : str, optional
+        Name of the vertical dimension, ordered from the top down (default: ``"z"``)
+    vmin : float, optional
+        Lower bound of the wind speed (m/s) in the denominator (default: 1e-3)
+
+    Returns
+    -------
+    xarray.DataArray
+        Bulk Richardson number (dimensionless) on each level
+
+    See :func:`earthkit.meteo.thermo.array.bulk_richardson_number` for the definition.
+    """
+    out = xr.apply_ufunc(
+        array.bulk_richardson_number,
+        theta_v,
+        z,
+        u,
+        v,
+        z_sfc,
+        kwargs={"vertical_dim": -1, "vmin": vmin},
+        input_core_dims=[[vertical_dim]] * 4 + [[]],
+        output_core_dims=[[vertical_dim]],
+    )
+    return out.transpose(*theta_v.dims, ...).assign_attrs({"units": "1", "long_name": "Bulk Richardson number"})
+
+
+def pbl_height_bulk_richardson(
+    theta_v: xr.DataArray,
+    z: xr.DataArray,
+    u: xr.DataArray,
+    v: xr.DataArray,
+    z_sfc: xr.DataArray | float = 0.0,
+    ri_crit: float = 0.22,
+    vertical_dim: str = "z",
+    vmin: float = 1.0e-3,
+) -> xr.DataArray:
+    r"""Compute the boundary layer height from the bulk Richardson number.
+
+    Parameters
+    ----------
+    theta_v : xarray.DataArray
+        Virtual potential temperature on levels (K)
+    z : xarray.DataArray
+        Height of the levels above sea level (m)
+    u : xarray.DataArray
+        Eastward wind component on levels (m/s)
+    v : xarray.DataArray
+        Northward wind component on levels (m/s)
+    z_sfc : xarray.DataArray or float, optional
+        Surface height above sea level (m), without the vertical dimension (default: 0)
+    ri_crit : float, optional
+        Critical bulk Richardson number, must be positive (default: 0.22)
+    vertical_dim : str, optional
+        Name of the vertical dimension, ordered from the top down (default: ``"z"``)
+    vmin : float, optional
+        Lower bound of the wind speed (m/s) in the denominator of the bulk Richardson
+        number (default: 1e-3)
+
+    Returns
+    -------
+    xarray.DataArray
+        Boundary layer height above ground (m), without the vertical dimension
+
+    See :func:`earthkit.meteo.thermo.array.pbl_height_bulk_richardson` for the definition.
+    """
+    out = xr.apply_ufunc(
+        array.pbl_height_bulk_richardson,
+        theta_v,
+        z,
+        u,
+        v,
+        z_sfc,
+        kwargs={"ri_crit": ri_crit, "vertical_dim": -1, "vmin": vmin},
+        input_core_dims=[[vertical_dim]] * 4 + [[]],
+        output_core_dims=[[]],
+    )
+    return out.assign_attrs({"units": "m", "long_name": "Boundary layer height above ground"})
