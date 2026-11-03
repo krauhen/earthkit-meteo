@@ -239,7 +239,7 @@ class MonotonicInterpolator:
                     r[mask] = self.data[0][mask]
                 else:
                     r[mask] = xp.nan
-                    m = mask & (xp.isclose(self.coord[0], tc))
+                    m = mask & self._at_level(self.coord[0], tc, xp)
                     r[m] = self.data[0][m]
             else:
                 r[mask] = xp.nan
@@ -264,7 +264,7 @@ class MonotonicInterpolator:
                     r[mask] = self.data[-1][mask]
                 else:
                     r[mask] = xp.nan
-                    m = mask & (xp.isclose(self.coord[-1], tc))
+                    m = mask & self._at_level(self.coord[-1], tc, xp)
                     r[m] = self.data[-1][m]
             else:
                 # print("Using aux top layer")
@@ -339,7 +339,7 @@ class MonotonicInterpolator:
                 if self.interpolation == "nearest":
                     r = self.data[0]
                 else:
-                    if xp.isclose(self.coord[0], tc):
+                    if self._at_level(self.coord[0], tc, xp):
                         r = self.data[0]
                         # print(f"tc: {tc} r: {r}")
                     else:
@@ -349,7 +349,7 @@ class MonotonicInterpolator:
                 if self.interpolation == "nearest":
                     r = self.data[-1]
                 else:
-                    if xp.isclose(self.coord[-1], tc):
+                    if self._at_level(self.coord[-1], tc, xp):
                         r = self.data[-1]
                     else:
                         r.fill(xp.nan)
@@ -369,6 +369,22 @@ class MonotonicInterpolator:
             res[target_idx] = r
 
         return res
+
+    @staticmethod
+    def _at_level(c, tc, xp):
+        """Return True where the target coordinate ``tc`` is on the level ``c``.
+
+        A target outside the coordinate range is only accepted when it equals the end
+        level up to a few units of the coordinate's floating point precision. A relative
+        tolerance like the default of ``isclose`` would accept targets about 1 Pa outside
+        a pressure column.
+        """
+        c = xp.asarray(c)
+        try:
+            eps = xp.finfo(c.dtype).eps
+        except (TypeError, ValueError, AttributeError):
+            return c == tc
+        return (c == tc) | (xp.abs(c - tc) <= 4 * eps * xp.abs(c))
 
     @staticmethod
     def _factor(c_top, c_bottom, tc, interpolation, xp):

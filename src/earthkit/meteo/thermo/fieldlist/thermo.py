@@ -250,7 +250,7 @@ def saturation_vapour_pressure(t: FieldList | Field, phase: str = "mixed", metho
         Define the phase with respect to the saturation vapour pressure is computed.
         It is either "water", "ice" or "mixed".
     method : str, optional
-        The computation method: "ifs" or "huang".
+        The computation method: "ifs", "huang" or "cosmo".
 
     Returns
     -------
@@ -284,7 +284,19 @@ def saturation_vapour_pressure(t: FieldList | Field, phase: str = "mixed", metho
       the IAPWS reference data between 0 °C and 100 °C for water and between -100 °C and 0 °C
       for ice.
 
-    When ``phase`` is "mixed" the formula is based on the value of ``t`` (for both methods):
+    * "cosmo": the Magnus formula with the constants of [Sonntag1990]_ is used when
+      ``phase`` is "water" or "ice":
+
+        .. math::
+
+            e_{sat} = a_{1} exp \left(a_{3}\frac{t_{c}}{t_{c} + b}\right)
+
+      where :math:`t_{c} = t - 273.15` is the temperature in °C and the parameters are set as follows:
+
+      * ``phase`` = "water": :math:`a_{1}` =611.2 Pa, :math:`a_{3}` =17.62 and :math:`b` =243.12 °C
+      * ``phase`` = "ice": :math:`a_{1}` =611.2 Pa, :math:`a_{3}` =22.46 and :math:`b` =272.62 °C
+
+    When ``phase`` is "mixed" the formula is based on the value of ``t`` (for all methods):
 
     * if :math:`t <= t_{i}`: the formula for ``phase`` = "ice" is used (:math:`t_{i} = 250.16 K`)
     * if :math:`t >= t_{0}`: the formula for ``phase`` = "water" is used (:math:`t_{0} = 273.16 K`)
@@ -425,7 +437,7 @@ def saturation_vapour_pressure_slope(
         It is either "water", "ice" or "mixed". See :func:`saturation_vapour_pressure`
         for details.
     method : str, optional
-        The computation method: "ifs" or "huang". See :func:`saturation_vapour_pressure`
+        The computation method: "ifs", "huang" or "cosmo". See :func:`saturation_vapour_pressure`
         for details.
 
     Returns
@@ -480,7 +492,7 @@ def saturation_mixing_ratio_slope(
     eps : float, optional
         Where p - es < ``eps`` nan is returned.
     method : str, optional
-        The computation method: "ifs" or "huang". See :func:`saturation_vapour_pressure`
+        The computation method: "ifs", "huang" or "cosmo". See :func:`saturation_vapour_pressure`
         for details.
 
     Returns
@@ -553,7 +565,7 @@ def saturation_specific_humidity_slope(
     eps : float, optional
         Where p - es < ``eps`` nan is returned.
     method : str, optional
-        The computation method: "ifs" or "huang". See :func:`saturation_vapour_pressure`
+        The computation method: "ifs", "huang" or "cosmo". See :func:`saturation_vapour_pressure`
         for details.
 
     Returns
@@ -619,7 +631,9 @@ def temperature_from_saturation_vapour_pressure(es: FieldList | Field) -> FieldL
     )
 
 
-def relative_humidity_from_dewpoint(t: FieldList | Field, td: FieldList | Field) -> FieldList | Field:
+def relative_humidity_from_dewpoint(
+    t: FieldList | Field, td: FieldList | Field, method: str = "ifs"
+) -> FieldList | Field:
     r"""Compute the relative humidity from dewpoint temperature.
 
     Parameters
@@ -628,6 +642,9 @@ def relative_humidity_from_dewpoint(t: FieldList | Field, td: FieldList | Field)
         Temperature (K).
     td : FieldList|Field
         Dewpoint (K).
+    method : str, optional
+        Method of the saturation vapour pressure: "ifs", "huang" or "cosmo".
+        See :func:`saturation_vapour_pressure` for details.
 
     Returns
     -------
@@ -645,11 +662,17 @@ def relative_humidity_from_dewpoint(t: FieldList | Field, td: FieldList | Field)
 
     """
     fieldlist_ufunc_kwargs = {"default_variable": "relative_humidity"}
-    return fieldlist_ufunc(array.relative_humidity_from_dewpoint, t, td, fieldlist_ufunc_kwargs=fieldlist_ufunc_kwargs)
+    return fieldlist_ufunc(
+        array.relative_humidity_from_dewpoint, t, td, fieldlist_ufunc_kwargs=fieldlist_ufunc_kwargs, method=method
+    )
 
 
 def relative_humidity_from_specific_humidity(
-    t: FieldList | Field, q: FieldList | Field, p: FieldList | Field | Iterable[float] | float | None = None
+    t: FieldList | Field,
+    q: FieldList | Field,
+    p: FieldList | Field | Iterable[float] | float | None = None,
+    phase: str = "mixed",
+    method: str = "ifs",
 ) -> FieldList | Field:
     r"""Compute the relative humidity from specific humidity.
 
@@ -665,6 +688,12 @@ def relative_humidity_from_specific_humidity(
         is a FieldList ``p`` must be a FieldList or an
         array-like of the same length as ``t``. If ``t``
         is a Field, ``p`` must be a single Field or a float.
+    phase : str, optional
+        Phase of the saturation vapour pressure: "mixed", "water" or "ice".
+        See :func:`saturation_vapour_pressure` for details.
+    method : str, optional
+        Method of the saturation vapour pressure: "ifs", "huang" or "cosmo".
+        See :func:`saturation_vapour_pressure` for details.
 
     Returns
     -------
@@ -676,24 +705,32 @@ def relative_humidity_from_specific_humidity(
 
     .. math::
 
-        r = 100 \frac {e(q, p)}{e_{msat}(t)}
+        r = 100 \frac {e(q, p)}{e_{sat}(t)}
 
     where:
 
         * :math:`e` is the vapour pressure (see :func:`vapour_pressure_from_specific_humidity`)
-        * :math:`e_{msat}` is the :func:`saturation_vapour_pressure` based on the "mixed" phase
+        * :math:`e_{sat}` is the :func:`saturation_vapour_pressure` with respect to ``phase``
 
     """
     fieldlist_ufunc_kwargs = {"default_variable": "relative_humidity"}
     if p is None:
         p = pressure_from_metadata(t)  # convert to Pa
     return fieldlist_ufunc(
-        array.relative_humidity_from_specific_humidity, t, q, p, fieldlist_ufunc_kwargs=fieldlist_ufunc_kwargs
+        array.relative_humidity_from_specific_humidity,
+        t,
+        q,
+        p,
+        fieldlist_ufunc_kwargs=fieldlist_ufunc_kwargs,
+        phase=phase,
+        method=method,
     )
 
 
 def specific_humidity_from_dewpoint(
-    td: FieldList | Field, p: FieldList | Field | Iterable[float] | float | None = None
+    td: FieldList | Field,
+    p: FieldList | Field | Iterable[float] | float | None = None,
+    method: str = "ifs",
 ) -> FieldList | Field:
     r"""Compute the specific humidity from dewpoint.
 
@@ -707,6 +744,9 @@ def specific_humidity_from_dewpoint(
         is a FieldList ``p`` must be a FieldList or an
         array-like of the same length as ``td``. If ``td``
         is a Field, ``p`` must be a single Field or a float.
+    method : str, optional
+        Method of the saturation vapour pressure: "ifs", "huang" or "cosmo".
+        See :func:`saturation_vapour_pressure` for details.
 
     Returns
     -------
@@ -732,7 +772,9 @@ def specific_humidity_from_dewpoint(
     fieldlist_ufunc_kwargs = {"default_variable": "specific_humidity"}
     if p is None:
         p = pressure_from_metadata(td)  # convert to Pa
-    return fieldlist_ufunc(array.specific_humidity_from_dewpoint, td, p, fieldlist_ufunc_kwargs=fieldlist_ufunc_kwargs)
+    return fieldlist_ufunc(
+        array.specific_humidity_from_dewpoint, td, p, fieldlist_ufunc_kwargs=fieldlist_ufunc_kwargs, method=method
+    )
 
 
 def mixing_ratio_from_dewpoint(
@@ -1295,7 +1337,8 @@ def ept_from_dewpoint(
         array-like of the same length as ``t``. If ``t``
         is a Field, ``p`` must be a single Field or a float.
     method : str, optional
-        Specify the computation method. The possible values are: "ifs", "bolton35", "bolton39", "bolton43".
+        Specify the computation method. The possible values are: "ifs", "bolton35", "bolton39",
+        "bolton43", "cosmo".
 
     Returns
     -------
@@ -1335,6 +1378,13 @@ def ept_from_dewpoint(
             t (\frac{10^{5}}{p})^{\kappa (1-0.28 w)} exp[(\frac{3376}{t_{LCL}} -
             2.54)w(1+0.81w)]
 
+    * "cosmo": the equivalent potential temperature is computed from the temperature and the
+      mixing ratio, without the lifting condensation level:
+
+        .. math::
+
+            \Theta_{e} = \Theta  exp(\frac{L_{v}  w}{c_{pd}  t})
+
     where:
 
         * :math:`\Theta` is the :func:`potential_temperature`
@@ -1344,6 +1394,7 @@ def ept_from_dewpoint(
 
             * method="davis" when ``method`` is "ifs"
             * method="bolton" when ``method`` is "bolton35", "bolton39", or "bolton43"
+              (not used by "cosmo")
         * :math:`q` is the specific humidity computed with :func:`specific_humidity_from_dewpoint`
         * :math:`w`: is the mixing ratio computed with :func:`mixing_ratio_from_dewpoint`
         * :math:`e` is the vapour pressure computed with :func:`vapour_pressure_from_mixing_ratio`
@@ -1386,7 +1437,7 @@ def ept_from_specific_humidity(
         is a Field, ``p`` must be a single Field or a float.
     method : str, optional
         Specify the computation method. The possible values are: "ifs",
-        "bolton35", "bolton39", "bolton43". See :func:`ept_from_dewpoint` for details.
+        "bolton35", "bolton39", "bolton43", "cosmo". See :func:`ept_from_dewpoint` for details.
 
     Returns
     -------
@@ -1431,6 +1482,7 @@ def saturation_ept(
         is a Field, ``p`` must be a single Field or a float.
     method : str, optional
         Specifies the computation method. The possible values are: "ifs", "bolton35", "bolton39".
+        The "cosmo" method is not supported here (NotImplementedError).
 
     Returns
     -------
@@ -1499,6 +1551,7 @@ def temperature_on_moist_adiabat(
     ept_method : str, optional
         Specifies the computation method that was used to compute ``ept``. The possible
         values are: "ifs", "bolton35", "bolton39".
+        The "cosmo" method is not supported here (NotImplementedError).
         (See :func:`ept_from_dewpoint` for details.)
     t_method : str, optional
         Specifies the iteration method along the moist adiabat to find the temperature
@@ -1537,6 +1590,7 @@ def wet_bulb_temperature_from_dewpoint(
     p: FieldList | Field | Iterable[float] | float | None = None,
     ept_method: str = "ifs",
     t_method: str = "bisect",
+    method: str = "normand",
 ) -> FieldList | Field:
     r"""Compute the pseudo adiabatic wet bulb temperature from dewpoint.
 
@@ -1555,6 +1609,7 @@ def wet_bulb_temperature_from_dewpoint(
     ept_method : str, optional
         Specifies the computation method for the equivalent potential temperature.
         The possible values are: "ifs", "bolton35", "bolton39".
+        The "cosmo" method is not supported here (NotImplementedError).
         (See :func:`ept_from_dewpoint` for details.)
     t_method : str, optional
         Specifies the method to find the temperature along the moist adiabat defined
@@ -1562,6 +1617,13 @@ def wet_bulb_temperature_from_dewpoint(
 
         * "bisect": :func:`temperature_on_moist_adiabat` with ``t_method`` = "bisect" is used
         * "newton": :func:`temperature_on_moist_adiabat` with ``t_method`` = "newton" is used
+
+    method : str, optional
+        Specifies the computation method. The possible values are as follows:
+
+        * "normand": Normand's rule is used with ``ept_method`` and ``t_method`` (see below).
+        * "cosmo": a closed-form approximation of the wet bulb temperature is used.
+          ``ept_method`` and ``t_method`` are ignored.
 
     Returns
     -------
@@ -1577,6 +1639,9 @@ def wet_bulb_temperature_from_dewpoint(
     * then the wet bulb potential temperature is determined as the temperature at
       pressure ``p`` on the moist adiabat with the given ``t_method``.
 
+    With ``method`` = "cosmo" the wet bulb temperature is computed from the temperature,
+    the dewpoint and the pressure with an empirical closed-form expression.
+
     """
     fieldlist_ufunc_kwargs = {"default_variable": "wet_bulb_temperature"}
     if p is None:
@@ -1589,6 +1654,7 @@ def wet_bulb_temperature_from_dewpoint(
         fieldlist_ufunc_kwargs=fieldlist_ufunc_kwargs,
         ept_method=ept_method,
         t_method=t_method,
+        method=method,
     )
 
 
@@ -1598,6 +1664,7 @@ def wet_bulb_temperature_from_specific_humidity(
     p: FieldList | Field | Iterable[float] | float | None = None,
     ept_method: str = "ifs",
     t_method: str = "bisect",
+    method: str = "normand",
 ) -> FieldList | Field:
     r"""Compute the pseudo adiabatic wet bulb temperature from specific humidity.
 
@@ -1616,6 +1683,7 @@ def wet_bulb_temperature_from_specific_humidity(
     ept_method : str, optional
         Specifies the computation method for the equivalent potential temperature.
         The possible values are: "ifs", "bolton35", "bolton39".
+        The "cosmo" method is not supported here (NotImplementedError).
         (See :func:`ept_from_dewpoint` for details.)
     t_method : str, optional
         Specifies the method to find the temperature along the moist adiabat
@@ -1624,6 +1692,14 @@ def wet_bulb_temperature_from_specific_humidity(
 
         * "bisect": :func:`temperature_on_moist_adiabat` with ``t_method`` = "bisect" is used
         * "newton": :func:`temperature_on_moist_adiabat` with ``t_method`` = "newton" is used
+
+    method : str, optional
+        Specifies the computation method. The possible values are as follows:
+
+        * "normand": Normand's rule is used with ``ept_method`` and ``t_method`` (see below).
+        * "cosmo": a closed-form approximation of the wet bulb temperature is used.
+          ``ept_method`` and ``t_method`` are ignored. Where the specific humidity is zero
+          the result is nan.
 
     Returns
     -------
@@ -1639,6 +1715,11 @@ def wet_bulb_temperature_from_specific_humidity(
     * then the wet bulb potential temperature is determined as the temperature at
       pressure ``p`` on the moist adiabat with the given ``t_method``.
 
+    With ``method`` = "cosmo" the wet bulb temperature is computed from the temperature,
+    the dewpoint and the pressure with an empirical closed-form expression. For
+    ``wet_bulb_temperature_from_specific_humidity`` the dewpoint is first derived with
+    :func:`dewpoint_from_specific_humidity`.
+
     """
     fieldlist_ufunc_kwargs = {"default_variable": "wet_bulb_temperature"}
     if p is None:
@@ -1651,6 +1732,7 @@ def wet_bulb_temperature_from_specific_humidity(
         fieldlist_ufunc_kwargs=fieldlist_ufunc_kwargs,
         ept_method=ept_method,
         t_method=t_method,
+        method=method,
     )
 
 
@@ -1678,6 +1760,7 @@ def wet_bulb_potential_temperature_from_dewpoint(
     ept_method : str, optional
         Specifies the computation method for the equivalent potential temperature.
         The possible values are: "ifs", "bolton35", "bolton39".
+        The "cosmo" method is not supported here (NotImplementedError).
         (See :func:`ept_from_dewpoint` for details.)
     t_method : str, optional
         Specifies the method to find the temperature along the moist adiabat defined
@@ -1740,6 +1823,7 @@ def wet_bulb_potential_temperature_from_specific_humidity(
     ept_method : str, optional
         Specifies the computation method for the equivalent potential temperature.
         The possible values are: "ifs", "bolton35", "bolton39".
+        The "cosmo" method is not supported here (NotImplementedError).
         (See :func:`ept_from_dewpoint` for details.)
     t_method : str, optional
         Specifies the method to find the temperature along the moist adiabat

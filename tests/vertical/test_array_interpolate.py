@@ -145,6 +145,51 @@ def test_array_interpolate_monotonic_a_a_a_2(data, coord, target_coord, mode, ex
 
 
 @pytest.mark.parametrize("xp, device", NUMPY)
+@pytest.mark.parametrize("mode", ["linear", "log"])
+@pytest.mark.parametrize("column", [False, True])
+def test_array_interpolate_monotonic_end_levels(mode, column, xp, device):
+    """Targets just outside the column are NaN, targets on the end levels give the end values."""
+    pres = np.linspace(100000.0, 10000.0, 10)
+    value = np.linspace(280.0, 220.0, 10)
+    target = [100000.5, 100000.0, 10000.0, 9999.5]
+    expected = np.array([np.nan, 280.0, 220.0, np.nan])
+
+    if column:
+        # data and coord with the same shape
+        value = xp.asarray(value, device=device)
+        pres = xp.asarray(pres, device=device)
+    else:
+        # array data with scalar coord
+        value = xp.asarray(np.stack([value, value], axis=1), device=device)
+        pres = xp.asarray(pres, device=device)
+        expected = np.stack([expected, expected], axis=1)
+
+    target = xp.asarray(target, device=device)
+    expected = xp.asarray(expected, device=device)
+
+    r = vertical.interpolate_monotonic(value, pres, target, mode)
+    assert xp.allclose(r, expected, equal_nan=True)
+
+
+@pytest.mark.parametrize("mode", ["linear", "log"])
+def test_array_interpolate_monotonic_end_levels_float32(mode):
+    pres = np.linspace(100000.0, 10000.0, 10).astype(np.float32)
+    value = np.linspace(280.0, 220.0, 10).astype(np.float32)
+    target = np.asarray([100000.5, 100000.0, 10000.0, 9999.5], dtype=np.float32)
+    r = vertical.interpolate_monotonic(value, pres, target, mode)
+    assert np.allclose(r, [np.nan, 280.0, 220.0, np.nan], equal_nan=True)
+
+
+def test_array_interpolate_monotonic_end_levels_int():
+    # integer coordinates: only an exact match counts as being on the end level
+    pres = np.asarray([1000, 900, 800, 700])
+    value = np.asarray([280.0, 270.0, 260.0, 250.0])
+    target = np.asarray([1001, 1000, 700, 699])
+    r = vertical.interpolate_monotonic(value, pres, target, "linear")
+    assert np.allclose(r, [np.nan, 280.0, 250.0, np.nan], equal_nan=True)
+
+
+@pytest.mark.parametrize("xp, device", NUMPY)
 @pytest.mark.parametrize(
     "value,pres,target,mode",
     [

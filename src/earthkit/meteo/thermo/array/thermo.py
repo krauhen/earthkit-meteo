@@ -15,6 +15,7 @@ from earthkit.utils.array import array_namespace
 
 from earthkit.meteo import constants
 from earthkit.meteo.utils.convert import celsius_to_kelvin
+from earthkit.meteo.vertical.array.vertical import _levels_first, nearest_level_index
 
 # import numpy as np
 
@@ -218,7 +219,7 @@ def saturation_vapour_pressure(t: ArrayLike, phase: str = "mixed", method: str =
         Define the phase with respect to the saturation vapour pressure is computed.
         It is either “water”, “ice” or “mixed”.
     method: str, optional
-        The computation method: "ifs" or "huang".
+        The computation method: "ifs", "huang" or "cosmo".
 
     Returns
     -------
@@ -252,7 +253,19 @@ def saturation_vapour_pressure(t: ArrayLike, phase: str = "mixed", method: str =
       the IAPWS reference data between 0 °C and 100 °C for water and between -100 °C and 0 °C
       for ice.
 
-    When ``phase`` is "mixed" the formula is based on the value of ``t`` (for both methods):
+    * "cosmo": the Magnus formula with the constants of [Sonntag1990]_ is used when
+      ``phase`` is "water" or "ice":
+
+        .. math::
+
+            e_{sat} = a_{1} exp \left(a_{3}\frac{t_{c}}{t_{c} + b}\right)
+
+      where :math:`t_{c} = t - 273.15` is the temperature in °C and the parameters are set as follows:
+
+      * ``phase`` = "water": :math:`a_{1}` =611.2 Pa, :math:`a_{3}` =17.62 and :math:`b` =243.12 °C
+      * ``phase`` = "ice": :math:`a_{1}` =611.2 Pa, :math:`a_{3}` =22.46 and :math:`b` =272.62 °C
+
+    When ``phase`` is "mixed" the formula is based on the value of ``t`` (for all methods):
 
     * if :math:`t <= t_{i}`: the formula for ``phase`` = "ice" is used (:math:`t_{i} = 250.16 K`)
     * if :math:`t >= t_{0}`: the formula for ``phase`` = "water" is used (:math:`t_{0} = 273.16 K`)
@@ -348,7 +361,7 @@ def saturation_vapour_pressure_slope(t: ArrayLike, phase: str = "mixed", method:
         It is either “water”, “ice” or “mixed”. See :func:`saturation_vapour_pressure`
         for details.
     method: str, optional
-        The computation method: "ifs" or "huang". See :func:`saturation_vapour_pressure`
+        The computation method: "ifs", "huang" or "cosmo". See :func:`saturation_vapour_pressure`
         for details.
 
     Returns
@@ -394,7 +407,7 @@ def saturation_mixing_ratio_slope(
     eps: number
         Where p - es < ``eps`` nan is returned.
     method: str, optional
-        The computation method: "ifs" or "huang". See :func:`saturation_vapour_pressure`
+        The computation method: "ifs", "huang" or "cosmo". See :func:`saturation_vapour_pressure`
         for details.
 
     Returns
@@ -460,7 +473,7 @@ def saturation_specific_humidity_slope(
     eps: number
         Where p - es < ``eps`` nan is returned.
     method: str, optional
-        The computation method: "ifs" or "huang". See :func:`saturation_vapour_pressure`
+        The computation method: "ifs", "huang" or "cosmo". See :func:`saturation_vapour_pressure`
         for details.
 
     Returns
@@ -519,7 +532,7 @@ def temperature_from_saturation_vapour_pressure(es: ArrayLike) -> ArrayLike:
     return compute_t_from_es(es)
 
 
-def relative_humidity_from_dewpoint(t: ArrayLike, td: ArrayLike) -> ArrayLike:
+def relative_humidity_from_dewpoint(t: ArrayLike, td: ArrayLike, method: str = "ifs") -> ArrayLike:
     r"""Compute the relative humidity from dewpoint temperature.
 
     Parameters
@@ -528,6 +541,9 @@ def relative_humidity_from_dewpoint(t: ArrayLike, td: ArrayLike) -> ArrayLike:
         Temperature (K)
     td: array-like
         Dewpoint (K)
+    method: str, optional
+        Method of the saturation vapour pressure: "ifs", "huang" or "cosmo".
+        See :func:`saturation_vapour_pressure` for details.
 
     Returns
     -------
@@ -544,12 +560,14 @@ def relative_humidity_from_dewpoint(t: ArrayLike, td: ArrayLike) -> ArrayLike:
     where :math:`e_{wsat}` is the :func:`saturation_vapour_pressure` over water.
 
     """
-    e = saturation_vapour_pressure(td, phase="water")
-    es = saturation_vapour_pressure(t, phase="water")
+    e = saturation_vapour_pressure(td, phase="water", method=method)
+    es = saturation_vapour_pressure(t, phase="water", method=method)
     return 100.0 * e / es
 
 
-def relative_humidity_from_specific_humidity(t: ArrayLike, q: ArrayLike, p: ArrayLike) -> ArrayLike:
+def relative_humidity_from_specific_humidity(
+    t: ArrayLike, q: ArrayLike, p: ArrayLike, phase: str = "mixed", method: str = "ifs"
+) -> ArrayLike:
     r"""Compute the relative humidity from specific humidity.
 
     Parameters
@@ -560,6 +578,12 @@ def relative_humidity_from_specific_humidity(t: ArrayLike, q: ArrayLike, p: Arra
         Specific humidity (kg/kg)
     p: array-like
         Pressure (Pa)
+    phase: str, optional
+        Phase of the saturation vapour pressure: "mixed", "water" or "ice".
+        See :func:`saturation_vapour_pressure` for details.
+    method: str, optional
+        Method of the saturation vapour pressure: "ifs", "huang" or "cosmo".
+        See :func:`saturation_vapour_pressure` for details.
 
     Returns
     -------
@@ -571,20 +595,20 @@ def relative_humidity_from_specific_humidity(t: ArrayLike, q: ArrayLike, p: Arra
 
     .. math::
 
-        r = 100 \frac {e(q, p)}{e_{msat}(t)}
+        r = 100 \frac {e(q, p)}{e_{sat}(t)}
 
     where:
 
         * :math:`e` is the vapour pressure (see :func:`vapour_pressure_from_specific_humidity`)
-        * :math:`e_{msat}` is the :func:`saturation_vapour_pressure` based on the "mixed" phase
+        * :math:`e_{sat}` is the :func:`saturation_vapour_pressure` with respect to ``phase``
 
     """
-    svp = saturation_vapour_pressure(t)
+    svp = saturation_vapour_pressure(t, phase=phase, method=method)
     e = vapour_pressure_from_specific_humidity(q, p)
     return 100.0 * e / svp
 
 
-def specific_humidity_from_dewpoint(td: ArrayLike, p: ArrayLike) -> ArrayLike:
+def specific_humidity_from_dewpoint(td: ArrayLike, p: ArrayLike, method: str = "ifs") -> ArrayLike:
     r"""Compute the specific humidity from dewpoint.
 
     Parameters
@@ -593,6 +617,9 @@ def specific_humidity_from_dewpoint(td: ArrayLike, p: ArrayLike) -> ArrayLike:
         Dewpoint (K)
     p: array-like
         Pressure (Pa)
+    method: str, optional
+        Method of the saturation vapour pressure: "ifs", "huang" or "cosmo".
+        See :func:`saturation_vapour_pressure` for details.
 
     Returns
     -------
@@ -615,7 +642,7 @@ def specific_humidity_from_dewpoint(td: ArrayLike, p: ArrayLike) -> ArrayLike:
     Then `q` is computed from :math:`e` using :func:`specific_humidity_from_vapour_pressure`.
 
     """
-    svp = saturation_vapour_pressure(td, phase="water")
+    svp = saturation_vapour_pressure(td, phase="water", method=method)
     return specific_humidity_from_vapour_pressure(svp, p)
 
 
@@ -1367,11 +1394,43 @@ class _EptCompBolton43(_EptComp):
         raise NotImplementedError("compute_t_on_ma_davies is not implemented for Bolton43 method!")
 
 
+class _EptCompCosmo(_EptComp):
+    # Only compute_ept is defined: the saturation ept, the wet-bulb relation and the moist-adiabat
+    # inversions are tied to the formulas of the other methods (as for "bolton43").
+    def __init__(self):
+        self.K0 = constants.Lv / constants.c_pd
+
+    def compute_ept(self, t=None, td=None, q=None, p=None):
+        if td is None and q is None:
+            raise ValueError("ept: either td or q must have a valid value!")
+
+        if q is None:
+            w = mixing_ratio_from_dewpoint(td, p)
+        else:
+            w = mixing_ratio_from_specific_humidity(q)
+
+        xp = array_namespace(t, w, p)
+        return potential_temperature(t, p) * xp.exp(self.K0 * w / t)
+
+    def compute_ept_sat(self, t, p):
+        raise NotImplementedError("compute_ept_sat is not implemented for cosmo method!")
+
+    def compute_wbpt(self, ept):
+        raise NotImplementedError("compute_wbpt is not implemented for cosmo method!")
+
+    def compute_t_on_ma_stipanuk(self, ept, p):
+        raise NotImplementedError("compute_t_on_ma_stipanuk is not implemented for cosmo method!")
+
+    def compute_t_on_ma_davies(self, ept, p):
+        raise NotImplementedError("compute_t_on_ma_davies is not implemented for cosmo method!")
+
+
 _EptComp.CM = {
     "ifs": _EptCompIfs,
     "bolton35": _EptCompBolton35,
     "bolton39": _EptCompBolton39,
     "bolton43": _EptCompBolton43,
+    "cosmo": _EptCompCosmo,
 }
 
 
@@ -1387,7 +1446,8 @@ def ept_from_dewpoint(t: ArrayLike, td: ArrayLike, p: ArrayLike, method: str = "
     p: number or array-like
         Pressure (Pa)
     method: str, optional
-        Specify the computation method. The possible values are: "ifs", "bolton35", "bolton39", "bolton43".
+        Specify the computation method. The possible values are: "ifs", "bolton35", "bolton39",
+        "bolton43", "cosmo".
 
     Returns
     -------
@@ -1426,6 +1486,13 @@ def ept_from_dewpoint(t: ArrayLike, td: ArrayLike, p: ArrayLike, method: str = "
             t (\frac{10^{5}}{p})^{\kappa (1-0.28 w)} exp[(\frac{3376}{t_{LCL}} -
             2.54)w(1+0.81w)]
 
+    * "cosmo": the equivalent potential temperature is computed from the temperature and the
+      mixing ratio, without the lifting condensation level:
+
+        .. math::
+
+            \Theta_{e} = \Theta  exp(\frac{L_{v}  w}{c_{pd}  t})
+
     where:
 
         * :math:`\Theta` is the :func:`potential_temperature`
@@ -1435,6 +1502,7 @@ def ept_from_dewpoint(t: ArrayLike, td: ArrayLike, p: ArrayLike, method: str = "
 
             * method="davis" when ``method`` is "ifs"
             * method="bolton" when ``method`` is "bolton35", "bolton39", or "bolton43"
+              (not used by "cosmo")
         * :math:`q` is the specific humidity computed with :func:`specific_humidity_from_dewpoint`
         * :math:`w`: is the mixing ratio computed with :func:`mixing_ratio_from_dewpoint`
         * :math:`e` is the vapour pressure computed with :func:`vapour_pressure_from_mixing_ratio`
@@ -1461,7 +1529,7 @@ def ept_from_specific_humidity(t: ArrayLike, q: ArrayLike, p: ArrayLike, method:
         Pressure (Pa)
     method: str, optional
         Specify the computation method. The possible values are: "ifs",
-        "bolton35", "bolton39", "bolton43". See :func:`ept_from_dewpoint` for details.
+        "bolton35", "bolton39", "bolton43", "cosmo". See :func:`ept_from_dewpoint` for details.
 
     Returns
     -------
@@ -1487,6 +1555,7 @@ def saturation_ept(t: ArrayLike, p: ArrayLike, method: str = "ifs") -> ArrayLike
         Pressure (Pa)
     method: str, optional
         Specifies the computation method. The possible values are: "ifs", "bolton35", "bolton39".
+        The "cosmo" method is not supported here (NotImplementedError).
 
     Returns
     -------
@@ -1547,6 +1616,7 @@ def temperature_on_moist_adiabat(
     ept_method: str, optional
         Specifies the computation method that was used to compute ``ept``. The possible
         values are: "ifs", "bolton35", "bolton39".
+        The "cosmo" method is not supported here (NotImplementedError).
         (See :func:`ept_from_dewpoint` for details.)
     t_method: str, optional
         Specifies the iteration method along the moist adiabat to find the temperature
@@ -1575,12 +1645,34 @@ def temperature_on_moist_adiabat(
         raise ValueError(f"temperature_on_moist_adiabat: invalid t_method={t_method} specified!")
 
 
+# Coefficients of the closed-form wet bulb temperature approximation
+# (method="cosmo"). Temperatures enter in units of 0.1 degC, pressure in Pa.
+_WB_FIT_G = 0.5
+_WB_FIT_H = 0.6
+_WB_FIT_I = 700.0
+_WB_FIT_L = 0.1
+_WB_FIT_M = 64000.0
+_WB_FIT_N = 11.564
+_WB_FIT_O = 1742.0
+
+
+def _wet_bulb_temperature_cosmo(t, td, p):
+    xp = array_namespace(t, td, p)
+    t, td, p = xp.asarray(t), xp.asarray(td), xp.asarray(p)
+    tl = (t - constants.T_C2K) * 10.0
+    tp = (td - constants.T_C2K) * 10.0
+    dt = tl - tp
+    zt = tp + _WB_FIT_G * dt * (_WB_FIT_H - tp / _WB_FIT_I)
+    return constants.T_C2K + _WB_FIT_L * (tp + dt / (1.0 + _WB_FIT_M * xp.exp(_WB_FIT_N * zt / (_WB_FIT_O + zt)) / p))
+
+
 def wet_bulb_temperature_from_dewpoint(
     t: ArrayLike,
     td: ArrayLike,
     p: ArrayLike,
     ept_method: str = "ifs",
     t_method: str = "bisect",
+    method: str = "normand",
 ) -> ArrayLike:
     r"""Compute the pseudo adiabatic wet bulb temperature from dewpoint.
 
@@ -1595,6 +1687,7 @@ def wet_bulb_temperature_from_dewpoint(
     ept_method: str, optional
         Specifies the computation method for the equivalent potential temperature.
         The possible values are: "ifs", "bolton35", "bolton39".
+        The "cosmo" method is not supported here (NotImplementedError).
         (See :func:`ept_from_dewpoint` for details.)
     t_method: str, optional
         Specifies the method to find the temperature along the moist adiabat defined
@@ -1602,6 +1695,13 @@ def wet_bulb_temperature_from_dewpoint(
 
         * "bisect": :func:`temperature_on_moist_adiabat` with ``t_method`` = "bisect" is used
         * "newton": :func:`temperature_on_moist_adiabat` with ``t_method`` = "newton" is used
+
+    method: str, optional
+        Specifies the computation method. The possible values are as follows:
+
+        * "normand": Normand's rule is used with ``ept_method`` and ``t_method`` (see below).
+        * "cosmo": a closed-form approximation of the wet bulb temperature is used.
+          ``ept_method`` and ``t_method`` are ignored.
 
     Returns
     -------
@@ -1616,7 +1716,14 @@ def wet_bulb_temperature_from_dewpoint(
     * then the wet bulb potential temperature is determined as the temperature at
       pressure ``p`` on the moist adiabat with the given ``t_method``.
 
+    With ``method`` = "cosmo" the wet bulb temperature is computed from the temperature,
+    the dewpoint and the pressure with an empirical closed-form expression.
+
     """
+    if method == "cosmo":
+        return _wet_bulb_temperature_cosmo(t, td, p)
+    if method != "normand":
+        raise ValueError(f"Invalid method={method!r}. Possible values: 'normand', 'cosmo'")
     ept = ept_from_dewpoint(t, td, p, method=ept_method)
     return temperature_on_moist_adiabat(ept, p, ept_method=ept_method, t_method=t_method)
 
@@ -1627,6 +1734,7 @@ def wet_bulb_temperature_from_specific_humidity(
     p: ArrayLike,
     ept_method: str = "ifs",
     t_method: str = "bisect",
+    method: str = "normand",
 ) -> ArrayLike:
     r"""Compute the pseudo adiabatic wet bulb temperature from specific humidity.
 
@@ -1641,6 +1749,7 @@ def wet_bulb_temperature_from_specific_humidity(
     ept_method: str, optional
         Specifies the computation method for the equivalent potential temperature.
         The possible values are: "ifs", "bolton35", "bolton39".
+        The "cosmo" method is not supported here (NotImplementedError).
         (See :func:`ept_from_dewpoint` for details.)
     t_method: str, optional
         Specifies the method to find the temperature along the moist adiabat
@@ -1649,6 +1758,14 @@ def wet_bulb_temperature_from_specific_humidity(
 
         * "bisect": :func:`temperature_on_moist_adiabat` with ``t_method`` = "bisect" is used
         * "newton": :func:`temperature_on_moist_adiabat` with ``t_method`` = "newton" is used
+
+    method: str, optional
+        Specifies the computation method. The possible values are as follows:
+
+        * "normand": Normand's rule is used with ``ept_method`` and ``t_method`` (see below).
+        * "cosmo": a closed-form approximation of the wet bulb temperature is used.
+          ``ept_method`` and ``t_method`` are ignored. Where the specific humidity is zero
+          the result is nan.
 
     Returns
     -------
@@ -1663,7 +1780,16 @@ def wet_bulb_temperature_from_specific_humidity(
     * then the wet bulb potential temperature is determined as the temperature at
       pressure ``p`` on the moist adiabat with the given ``t_method``.
 
+    With ``method`` = "cosmo" the wet bulb temperature is computed from the temperature,
+    the dewpoint and the pressure with an empirical closed-form expression. For
+    ``wet_bulb_temperature_from_specific_humidity`` the dewpoint is first derived with
+    :func:`dewpoint_from_specific_humidity`.
+
     """
+    if method == "cosmo":
+        return _wet_bulb_temperature_cosmo(t, dewpoint_from_specific_humidity(q, p), p)
+    if method != "normand":
+        raise ValueError(f"Invalid method={method!r}. Possible values: 'normand', 'cosmo'")
     ept = ept_from_specific_humidity(t, q, p, method=ept_method)
     return temperature_on_moist_adiabat(ept, p, ept_method=ept_method, t_method=t_method)
 
@@ -1688,6 +1814,7 @@ def wet_bulb_potential_temperature_from_dewpoint(
     ept_method: str, optional
         Specifies the computation method for the equivalent potential temperature.
         The possible values are: "ifs", "bolton35", "bolton39".
+        The "cosmo" method is not supported here (NotImplementedError).
         (See :func:`ept_from_dewpoint` for details.)
     t_method: str, optional
         Specifies the method to find the temperature along the moist adiabat defined
@@ -1738,6 +1865,7 @@ def wet_bulb_potential_temperature_from_specific_humidity(
     ept_method: str, optional
         Specifies the computation method for the equivalent potential temperature.
         The possible values are: "ifs", "bolton35", "bolton39".
+        The "cosmo" method is not supported here (NotImplementedError).
         (See :func:`ept_from_dewpoint` for details.)
     t_method: str, optional
         Specifies the method to find the temperature along the moist adiabat
@@ -1795,3 +1923,242 @@ def specific_gas_constant(q: ArrayLike) -> ArrayLike:
     """
     R = constants.Rd + (constants.Rv - constants.Rd) * q
     return R
+
+
+def bulk_richardson_number(
+    theta_v: ArrayLike,
+    z: ArrayLike,
+    u: ArrayLike,
+    v: ArrayLike,
+    z_sfc: ArrayLike = 0.0,
+    vertical_dim: int = 0,
+    vmin: float = 1.0e-3,
+) -> ArrayLike:
+    r"""Compute the bulk Richardson number on each level relative to the lowest level.
+
+    *New in version 1.4.0*
+
+    Parameters
+    ----------
+    theta_v: array-like
+        Virtual potential temperature on levels (K)
+    z: array-like
+        Height of the levels above sea level (m)
+    u: array-like
+        Eastward wind component on levels (m/s)
+    v: array-like
+        Northward wind component on levels (m/s)
+    z_sfc: array-like, optional
+        Surface height above sea level (m), shaped like one level (default: 0)
+    vertical_dim: int, optional
+        Vertical axis of ``theta_v``, ``z``, ``u`` and ``v`` (default: 0)
+    vmin: float, optional
+        Lower bound of the wind speed (m/s) in the denominator (default: 1e-3)
+
+    Returns
+    -------
+    array-like
+        Bulk Richardson number (dimensionless) on each level, with the same
+        floating point type as ``theta_v``.
+
+
+    The levels must be ordered from the top down: the last level along ``vertical_dim``
+    is the lowest one, :math:`n`. The computation is based on the following formula
+    for the surface-relative bulk Richardson number [Stull1988]_:
+
+    .. math::
+
+        Ri_{b,k} = \frac{g \, (z_k - z_{sfc}) \, (\theta_{v,k} - \theta_{v,n})}
+        {\overline{\theta_v}_k \, \max(u_k^2 + v_k^2, v_{min}^2)}
+
+    where:
+
+        * :math:`g` is the gravitational acceleration (see :data:`earthkit.meteo.constants.g`)
+        * :math:`\overline{\theta_v}_k` is the unweighted mean of :math:`\theta_v` over the
+          levels :math:`k` to :math:`n` (not weighted by layer thickness)
+        * the wind speed is taken relative to the surface, where the wind is assumed to
+          be zero, so the wind of the lowest level is not subtracted
+        * the height difference is :math:`z_k - z_{sfc}`, not :math:`z_k - z_n`
+
+    The value on the lowest level is 0. A nan in ``u`` or ``v`` makes only the same level nan.
+    A nan in ``theta_v`` on level :math:`j` makes all levels :math:`k \le j` nan, because
+    it enters the mean over the levels :math:`k` to :math:`n`; a nan on the lowest level
+    makes all levels nan.
+    """
+    xp = array_namespace(theta_v, z, u, v)
+    theta_v = _levels_first(xp, xp.asarray(theta_v), vertical_dim)
+    z = _levels_first(xp, xp.asarray(z), vertical_dim)
+    u = _levels_first(xp, xp.asarray(u), vertical_dim)
+    v = _levels_first(xp, xp.asarray(v), vertical_dim)
+    z_sfc = xp.asarray(z_sfc, dtype=theta_v.dtype)
+
+    nlev = theta_v.shape[0]
+    total = xp.flip(xp.cumulative_sum(xp.flip(theta_v, axis=0), axis=0), axis=0)
+    count = xp.arange(nlev, 0, -1, dtype=theta_v.dtype)
+    count = xp.reshape(count, (nlev,) + (1,) * (theta_v.ndim - 1))
+    mean = total / count
+
+    speed2 = xp.maximum(u**2 + v**2, xp.asarray(vmin**2, dtype=theta_v.dtype))
+    ri = constants.g * (z - z_sfc) * (theta_v - theta_v[-1, ...]) / (mean * speed2)
+    return ri if vertical_dim == 0 else xp.moveaxis(ri, 0, vertical_dim)
+
+
+def pbl_height_bulk_richardson(
+    theta_v: ArrayLike,
+    z: ArrayLike,
+    u: ArrayLike,
+    v: ArrayLike,
+    z_sfc: ArrayLike = 0.0,
+    ri_crit: float = 0.22,
+    vertical_dim: int = 0,
+    vmin: float = 1.0e-3,
+) -> ArrayLike:
+    r"""Compute the boundary layer height from the bulk Richardson number.
+
+    *New in version 1.4.0*
+
+    Parameters
+    ----------
+    theta_v: array-like
+        Virtual potential temperature on levels (K)
+    z: array-like
+        Height of the levels above sea level (m)
+    u: array-like
+        Eastward wind component on levels (m/s)
+    v: array-like
+        Northward wind component on levels (m/s)
+    z_sfc: array-like, optional
+        Surface height above sea level (m), shaped like one level (default: 0)
+    ri_crit: float, optional
+        Critical bulk Richardson number, must be positive (default: 0.22).
+        The critical value is empirical and depends on the formulation and the
+        vertical resolution, see [Vogelezang1996]_.
+    vertical_dim: int, optional
+        Vertical axis of ``theta_v``, ``z``, ``u`` and ``v`` (default: 0)
+    vmin: float, optional
+        Lower bound of the wind speed (m/s) in the denominator of the bulk Richardson
+        number (default: 1e-3)
+
+    Returns
+    -------
+    array-like
+        Boundary layer height above ground (m), without the vertical axis, with the same
+        floating point type as ``theta_v``. It is nan where the bulk Richardson number
+        does not exceed ``ri_crit`` on any level.
+
+    Raises
+    ------
+    ValueError
+        If ``ri_crit`` is not positive.
+
+
+    The levels must be ordered from the top down: the last level along ``vertical_dim``
+    is the lowest one. The bulk Richardson number :math:`Ri_b` is computed with
+    :func:`bulk_richardson_number` [Stull1988]_ and the column is searched upwards from
+    the lowest level, where :math:`Ri_b = 0`, for the first level :math:`k` with
+    :math:`Ri_{b,k} > Ri_{crit}`. The height is interpolated linearly in :math:`Ri_b`
+    between this level and the level :math:`k+1` below it [Vogelezang1996]_:
+
+    .. math::
+
+        h = h_{k+1} + \frac{Ri_{crit} - Ri_{b,k+1}}{Ri_{b,k} - Ri_{b,k+1}} \, (h_k - h_{k+1})
+
+    where :math:`h_k = z_k - z_{sfc}` is the height above ground.
+
+    A nan in the inputs propagates as described in :func:`bulk_richardson_number`. A level
+    with a nan :math:`Ri_b` never exceeds ``ri_crit``; the result is nan if such a level
+    is the level :math:`k+1` directly below the first exceeding level, or if it makes the
+    search find no level at all.
+    """
+    if not ri_crit > 0:
+        raise ValueError(f"ri_crit must be positive, got {ri_crit}")
+
+    xp = array_namespace(theta_v, z, u, v)
+    theta_v = _levels_first(xp, xp.asarray(theta_v), vertical_dim)
+    z = _levels_first(xp, xp.asarray(z), vertical_dim)
+    u = _levels_first(xp, xp.asarray(u), vertical_dim)
+    v = _levels_first(xp, xp.asarray(v), vertical_dim)
+    z_sfc = xp.asarray(z_sfc, dtype=theta_v.dtype)
+
+    ri = bulk_richardson_number(theta_v, z, u, v, z_sfc=z_sfc, vmin=vmin)
+    h = z - z_sfc
+    crit = xp.asarray(ri_crit, dtype=ri.dtype)
+
+    nlev = ri.shape[0]
+    exceed = ri > crit
+    found = xp.any(exceed, axis=0)
+    # first exceeding level counted from the lowest one
+    k = nlev - 1 - xp.argmax(xp.astype(xp.flip(exceed, axis=0), xp.int8), axis=0)
+    kb = xp.minimum(k + 1, nlev - 1)
+
+    def _at(a, idx):
+        return xp.take_along_axis(a, idx[xp.newaxis, ...], axis=0)[0]
+
+    ri_k, ri_b, h_k, h_b = _at(ri, k), _at(ri, kb), _at(h, k), _at(h, kb)
+    den = xp.where(found, ri_k - ri_b, xp.ones_like(ri_k))
+    out = h_b + (crit - ri_b) / den * (h_k - h_b)
+    out = xp.where(found, out, xp.asarray(xp.nan, dtype=out.dtype))
+    return xp.astype(out, theta_v.dtype)
+
+
+_K_INDEX_P500 = 50000.0  # Pa
+_K_INDEX_P700 = 70000.0  # Pa
+_K_INDEX_P850 = 85000.0  # Pa
+
+
+def k_index(
+    t: ArrayLike,
+    td: ArrayLike,
+    p: ArrayLike,
+    vertical_dim: int = 0,
+    max_diff: float = 3000.0,
+) -> ArrayLike:
+    r"""Compute the K index from temperature and dewpoint on levels.
+
+    *New in version 1.4.0*
+
+    Parameters
+    ----------
+    t: array-like
+        Temperature on levels (K)
+    td: array-like
+        Dewpoint temperature on levels (K)
+    p: array-like
+        Pressure of the levels (Pa)
+    vertical_dim: int, optional
+        Vertical axis of ``t``, ``td`` and ``p`` (default: 0)
+    max_diff: float, optional
+        Largest accepted distance (Pa) between a level and each of the 850, 700 and
+        500 hPa targets (default: 3000)
+
+    Returns
+    -------
+    array-like
+        K index (K), without the vertical axis, with the same floating point type as ``t``.
+
+
+    The computation is based on the following formula [George1960]_:
+
+    .. math::
+
+        K = (T_{850} - T_{500}) + T_{d,850} - (T_{700} - T_{d,700})
+
+    where each subscript is the level nearest to that pressure (hPa), selected with
+    :func:`earthkit.meteo.vertical.array.nearest_level_index`. The result is nan for a
+    column where any of the three targets has no level within ``max_diff``, and where
+    ``t`` or ``td`` is nan on a selected level.
+    """
+    xp = array_namespace(t, td, p)
+    t = _levels_first(xp, xp.asarray(t), vertical_dim)
+    td = _levels_first(xp, xp.asarray(td), vertical_dim)
+    p = _levels_first(xp, xp.asarray(p), vertical_dim)
+
+    idx = nearest_level_index(p, [_K_INDEX_P500, _K_INDEX_P700, _K_INDEX_P850], max_diff=max_diff)
+    found = xp.all(idx >= 0, axis=0)
+    idx = xp.where(idx >= 0, idx, xp.zeros_like(idx))
+
+    def at(a, i):
+        return xp.take_along_axis(a, idx[i : i + 1, ...], axis=0)[0]
+
+    k = (at(t, 2) - at(t, 0)) + at(td, 2) - (at(t, 1) - at(td, 1))
+    return xp.where(found, k, xp.asarray(xp.nan, dtype=k.dtype))
