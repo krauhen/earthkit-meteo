@@ -9,6 +9,9 @@
 
 from __future__ import annotations
 
+from typing import Literal
+
+import numpy as np
 import xarray as xr
 
 from earthkit.meteo import constants
@@ -264,3 +267,182 @@ def extrapolate_geopotential_to_pressure_levels_below_surface(
         "standard_name": "geopotential",
         "units": "m2 s-2",
     })
+
+
+def extrapolate_below_lowest_level(
+    data: xr.DataArray,
+    z: xr.DataArray,
+    target_z: xr.DataArray | float,
+    mode: Literal["lapse_rate", "constant", "linear", "hydrostatic"] = "lapse_rate",
+    lapse_rate: xr.DataArray | float = constants.standard_lapse_rate,
+    vertical_dim: str = "z",
+    start_z: xr.DataArray | float | None = None,
+    start_value: xr.DataArray | float | None = None,
+    t_start: xr.DataArray | float | None = None,
+) -> xr.DataArray:
+    r"""Extrapolate data to target heights below a start level, by default the lowest level.
+
+    Parameters
+    ----------
+    data : xr.DataArray
+        Data on levels, with the vertical dimension ``vertical_dim``.
+    z : xr.DataArray
+        Height of the levels. It can have only the vertical dimension.
+    target_z : xr.DataArray | float
+        Target heights, in the same units and with the same datum as ``z``. A float, a
+        DataArray without extra dimension (one target per column), or a DataArray with one
+        extra dimension, which is not a dimension of ``data`` and lists the target heights.
+    mode : {"lapse_rate", "constant", "linear", "hydrostatic"}, default="lapse_rate"
+        Extrapolation method.
+    lapse_rate : xr.DataArray | float
+        Lapse rate [K/m] for ``mode="lapse_rate"`` and ``mode="hydrostatic"``.
+    vertical_dim : str, default="z"
+        Name of the vertical dimension of ``data``, ``z`` and ``target_z``.
+    start_z, start_value, t_start : xr.DataArray | float, optional
+        Height, data and temperature of the start level, without ``vertical_dim``.
+
+    Returns
+    -------
+    xr.DataArray
+        The extrapolated data, without ``vertical_dim``. It has the extra dimension of
+        ``target_z``, if there is one.
+
+    See :func:`earthkit.meteo.vertical.array.extrapolate_below_lowest_level`
+    for the definition.
+    """
+    squeeze = None
+    if not isinstance(target_z, xr.DataArray):
+        target_in, tcore, ocore = target_z, [], []
+    else:
+        extra = [d for d in target_z.dims if d not in data.dims]
+        if len(extra) > 1:
+            raise ValueError(f"target_z has more than one extra dimension: {extra}")
+        if not extra:
+            squeeze = "_target_level"
+            target_z = target_z.expand_dims(squeeze)
+            extra = [squeeze]
+        ref = data.isel({vertical_dim: 0}, drop=True)
+        target_in, tcore, ocore = target_z.broadcast_like(ref), extra, extra
+
+    def _f(data, z, target, *rest):
+        sz, sv, ts, lr = rest
+        return array.extrapolate_below_lowest_level(
+            data,
+            z,
+            target,
+            mode=mode,
+            lapse_rate=lr,
+            vertical_dim=-1,
+            start_z=sz,
+            start_value=sv,
+            t_start=ts,
+        )
+
+    out = xr.apply_ufunc(
+        _f,
+        data,
+        z,
+        target_in,
+        start_z,
+        start_value,
+        t_start,
+        lapse_rate,
+        input_core_dims=[[vertical_dim], [vertical_dim], tcore, [], [], [], []],
+        output_core_dims=[ocore],
+    )
+    return out if squeeze is None else out.squeeze(squeeze, drop=True)
+
+
+def height_of_isotherm(
+    t: xr.DataArray,
+    z: xr.DataArray,
+    t_target: float = constants.T_C2K,
+    z_max: float | None = None,
+    zs: xr.DataArray | None = None,
+    extrapolate: bool = False,
+    vertical_dim: str = "z",
+) -> xr.DataArray:
+    r"""Height where the temperature first reaches ``t_target`` when going down a column.
+
+    Parameters
+    ----------
+    t : xr.DataArray
+        Temperature on levels [K].
+    z : xr.DataArray
+        Height of the levels [m], monotonic along ``vertical_dim``. It can have only the
+        vertical dimension.
+    t_target : float, default=:data:`earthkit.meteo.constants.T_C2K`
+        Temperature of the isotherm [K].
+    z_max : float or None, default=None
+        Height [m] above ``zs`` where the search starts. ``None`` starts at the top level.
+    zs : xr.DataArray, optional
+        Surface height [m].
+    extrapolate : bool, default=False
+        Extrapolate below the lowest level when no crossing is found.
+    vertical_dim : str, default="z"
+        Name of the vertical dimension of ``t`` and ``z``.
+
+    Returns
+    -------
+    xr.DataArray
+        Height of the isotherm [m], without ``vertical_dim``.
+
+    See :func:`earthkit.meteo.vertical.array.height_of_isotherm`
+    for the definition.
+    """
+
+    def _f(t, z, *zs_):
+        return array.height_of_isotherm(
+            t,
+            z,
+            t_target=t_target,
+            z_max=z_max,
+            zs=zs_[0] if zs_ else None,
+            extrapolate=extrapolate,
+            vertical_dim=-1,
+        )
+
+    args = [t, z] if zs is None else [t, z, zs]
+    core = [[vertical_dim], [vertical_dim]] + ([] if zs is None else [[]])
+    return xr.apply_ufunc(_f, *args, input_core_dims=core, output_core_dims=[[]]).assign_attrs({
+        "units": "m",
+    })
+
+
+def nearest_level_index(
+    coords: xr.DataArray,
+    target_coords: xr.DataArray | float,
+    max_diff: float | None = None,
+    vertical_dim: str = "z",
+) -> xr.DataArray:
+    r"""Index of the level nearest to each target coordinate, per column.
+
+    Parameters
+    ----------
+    coords : xr.DataArray
+        Vertical coordinate of the levels (e.g. pressure or height). Levels where
+        ``coords`` is nan are never selected.
+    target_coords : xr.DataArray | float
+        Target coordinates, same units as ``coords``. Broadcast against ``coords``
+        following xarray rules; a DataArray with its own dimension (not ``vertical_dim``)
+        adds that dimension to the result.
+    max_diff : float, optional
+        Largest accepted distance between a level and its target. When the nearest
+        level is farther away the result is -1. ``None`` (default) accepts any distance.
+    vertical_dim : str, default="z"
+        Name of the vertical dimension of ``coords``.
+
+    Returns
+    -------
+    xr.DataArray
+        Integer level indices, without ``vertical_dim``.
+
+    See :func:`earthkit.meteo.vertical.array.nearest_level_index`
+    for the definition.
+    """
+    dist = abs(coords - target_coords).fillna(np.inf)
+    dmin = dist.min(dim=vertical_dim)
+    ok = dmin < np.inf
+    if max_diff is not None:
+        ok = ok & (dmin <= max_diff)
+    return dist.argmin(dim=vertical_dim).where(ok, -1)

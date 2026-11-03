@@ -187,3 +187,25 @@ def test_highlevel_compatible_with_backend_api(backend_case, op_name):
     ref = getattr(impl, op_name)(*args, **kwargs)
 
     assert _signature(got) == _signature(ref)
+
+
+@pytest.mark.parametrize(
+    "op_name,args,kwargs",
+    [
+        ("relative_humidity_from_dewpoint", ([263.15, 293.15], [258.15, 283.15]), {"method": "cosmo"}),
+        ("specific_humidity_from_dewpoint", ([258.15, 283.15], [85000.0, 100000.0]), {"method": "cosmo"}),
+        (
+            "relative_humidity_from_specific_humidity",
+            ([263.15, 293.15], [0.001, 0.008], [85000.0, 100000.0]),
+            {"phase": "water", "method": "cosmo"},
+        ),
+    ],
+)
+def test_highlevel_humidity_method(op_name, args, kwargs):
+    import earthkit.meteo.thermo.array as array
+
+    args = tuple(np.asarray(a) for a in args)
+    got = getattr(thermo, op_name)(*args, **kwargs)
+    ref = getattr(array, op_name)(*args, **kwargs)
+    assert np.allclose(got, ref)
+    assert not np.allclose(got, getattr(array, op_name)(*args))
