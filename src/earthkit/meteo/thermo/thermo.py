@@ -3322,7 +3322,7 @@ def freezing_level(
     t_sfc: "xarray.DataArray" | float | None = None,
     z_sfc: "xarray.DataArray" | float | None = None,
     threshold: float = constants.T_C2K,
-    lapse_rate: float | None = None,
+    lapse_rate: "xarray.DataArray" | float | None = None,
     min_height: float | None = None,
     vertical_dim: str = "z",
 ) -> "xarray.DataArray":
@@ -3350,8 +3350,9 @@ def freezing_level(
         together with ``t_sfc``.
     threshold: float, optional
         Temperature defining the freezing level (K). Defaults to 0 °C (273.15 K).
-    lapse_rate: float, optional
+    lapse_rate: xarray.DataArray or float, optional
         Rate at which the temperature decreases with height (K m-1), e.g. 0.0065.
+        An array gives one rate per column; non-positive or missing values are not extrapolated.
         When given, columns without a crossing are extrapolated from the surface:
         :math:`z_{sfc} - (threshold - t_{sfc}) / lapse\_rate`. This lies below
         ``z_sfc`` when the column is colder than ``threshold`` everywhere. When not
